@@ -118,6 +118,7 @@ binds {
     Mod+Period                           { set-column-width "+10%"; }
     Mod+Shift+Minus                     { set-window-height "-10%"; }
     Mod+Shift+Period                     { set-window-height "+10%"; }
+    Mod+R                               { switch-preset-column-width; }
     Mod+Shift+R                         { switch-preset-window-height; }
 
     // ─── Modes ───
