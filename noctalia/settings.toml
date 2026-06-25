@@ -1,0 +1,94 @@
+[bar.default]
+background_opacity = 0.64999998547136784
+center = [ "clock", "workspaces" ]
+end = [ "tray", "notifications", "clipboard", "volume", "session" ]
+padding = 30
+start = [ "launcher", "wallpaper", "active_window" ]
+thickness = 36
+
+[desktop_widgets]
+enabled = false
+
+[dock]
+auto_hide = true
+background_opacity = 0.4999999888241291
+enabled = true
+icon_size = 30
+launcher_position = "start"
+magnification_scale = 1.0
+reserve_space = false
+
+[idle]
+behavior_order = [ "lock", "screen-off", "lock-and-suspend" ]
+
+    [idle.behavior.lock]
+    action = "lock"
+    enabled = true
+    timeout = 600.0
+
+    [idle.behavior.lock-and-suspend]
+    action = "lock_and_suspend"
+    enabled = false
+    timeout = 900.0
+
+    [idle.behavior.screen-off]
+    action = "screen_off"
+    enabled = true
+    timeout = 660.0
+
+[notification]
+background_opacity = 0.48999998904764652
+
+[osd]
+background_opacity = 0.4999999888241291
+
+[shell]
+polkit_agent = true
+settings_show_advanced = true
+
+    [shell.panel]
+    open_near_click_control_center = true
+    transparency_mode = "glass"
+
+    [[shell.session.actions]]
+    action = "lock"
+    countdown_seconds = 0.0
+    enabled = false
+    shortcut = "1"
+    variant = "default"
+
+    [[shell.session.actions]]
+    action = "logout"
+    countdown_seconds = 0.0
+    enabled = true
+    shortcut = "2"
+    variant = "default"
+
+    [[shell.session.actions]]
+    action = "lock_and_suspend"
+    countdown_seconds = 0.0
+    enabled = false
+    shortcut = "3"
+    variant = "default"
+
+    [[shell.session.actions]]
+    action = "reboot"
+    countdown_seconds = 0.0
+    enabled = true
+    shortcut = "4"
+    variant = "default"
+
+    [[shell.session.actions]]
+    action = "shutdown"
+    countdown_seconds = 0.0
+    enabled = true
+    shortcut = "5"
+    variant = "destructive"
+
+[theme]
+source = "wallpaper"
+
+    [theme.templates]
+    enable_builtin_templates = false
+    enable_community_templates = false
+

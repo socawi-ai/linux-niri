@@ -1,0 +1,1243 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─────────────────────────────────────────────────────────────
+# Fedora Niri Installer
+#
+# Run as a normal user:
+#
+#   bash fedora-niri.sh
+#
+# Do not run with sudo.
+# Do not run with sh.
+# ─────────────────────────────────────────────────────────────
+
+WARNINGS=()
+INSTALLED=()
+SKIPPED_PACKAGES=()
+FAILED_PACKAGES=()
+
+SKIP_UNAVAILABLE="${SKIP_UNAVAILABLE:-true}"
+INSTALL_TIDE="${INSTALL_TIDE:-false}"
+SET_FISH_DEFAULT="${SET_FISH_DEFAULT:-false}"
+
+INSTALL_REPO_NIRI_CONFIG="${INSTALL_REPO_NIRI_CONFIG:-true}"
+INSTALL_REPO_ALACRITTY_CONFIG="${INSTALL_REPO_ALACRITTY_CONFIG:-true}"
+INSTALL_REPO_WALLPAPERS="${INSTALL_REPO_WALLPAPERS:-true}"
+
+ENABLE_PLYMOUTH_SPLASH="${ENABLE_PLYMOUTH_SPLASH:-true}"
+
+INSTALL_REPO_NOCTALIA_CONFIG="${INSTALL_REPO_NOCTALIA_CONFIG:-false}"
+
+NIRI_REPO_URL="${NIRI_REPO_URL:-https://github.com/socawi-ai/linux-niri.git}"
+NIRI_REPO_BRANCH="${NIRI_REPO_BRANCH:-main}"
+
+MCMOJAVE_REPO_URL="${MCMOJAVE_REPO_URL:-https://github.com/vinceliuice/McMojave-cursors.git}"
+MCMOJAVE_REPO_BRANCH="${MCMOJAVE_REPO_BRANCH:-master}"
+
+BITWARDEN_RPM_URL="${BITWARDEN_RPM_URL:-https://vault.bitwarden.com/download/?app=desktop&platform=linux&variant=rpm}"
+
+GRUB2_THEMES_REPO_URL="${GRUB2_THEMES_REPO_URL:-https://github.com/vinceliuice/grub2-themes.git}"
+GRUB2_THEMES_REPO_BRANCH="${GRUB2_THEMES_REPO_BRANCH:-master}"
+GRUB2_THEME_NAME="${GRUB2_THEME_NAME:-tela}"
+GRUB2_THEME_RESOLUTION="${GRUB2_THEME_RESOLUTION:-3440x1440}"
+GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
+
+banner() {
+  cat <<'EOF'
+
+╭───────────────────────────────────────────────╮
+│ Fedora Niri Installer                          │
+│ Niri + Noctalia v5 + greetd + Fish + Alacritty │
+╰───────────────────────────────────────────────╯
+
+This script will set up a minimal Fedora Wayland desktop.
+
+It will:
+  - install desktop packages
+  - enable RPM Fusion and COPR repositories
+  - install Noctalia v5 and Noctalia Greeter
+  - configure greetd
+  - copy Niri and Alacritty config from GitHub
+  - copy wallpapers from GitHub into your Pictures folder
+  - install JetBrains Mono for Alacritty
+  - install Nautilus open-any-terminal and set Alacritty as default
+  - install Bitwarden from RPM
+  - install GNOME Software
+  - install GRUB2 Tela theme at 3440x1440
+  - configure Plymouth spinner boot splash using rhgb quiet
+  - configure notify-only update checks
+  - apply Swedish locale and keyboard settings
+
+EOF
+}
+
+log() {
+  printf '\n==> %s\n' "$*"
+}
+
+info() {
+  printf '    %s\n' "$*"
+}
+
+warn() {
+  WARNINGS+=("$*")
+  printf '\nWARNING: %s\n' "$*" >&2
+}
+
+die() {
+  printf '\nERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+record_installed() {
+  INSTALLED+=("$*")
+}
+
+backup_path() {
+  local path="$1"
+  local backup
+
+  if [ -e "$path" ]; then
+    backup="${path}.bak.$(date +%Y%m%d-%H%M%S)"
+    cp -a "$path" "$backup"
+    info "Backed up $path to $backup"
+  fi
+}
+
+require_not_root() {
+  log "Checking how the script was started..."
+
+  if [ "${EUID}" -eq 0 ]; then
+    die "Do not run this script as root. Run it as your normal user; sudo will be used where needed."
+  fi
+
+  info "Running as normal user: $(id -un)"
+}
+
+require_sudo() {
+  log "Checking sudo access..."
+  sudo -v
+  info "Sudo is ready."
+}
+
+check_fedora() {
+  log "Checking Fedora..."
+
+  if [ ! -r /etc/os-release ]; then
+    die "/etc/os-release not found."
+  fi
+
+  # shellcheck disable=SC1091
+  . /etc/os-release
+
+  if [ "${ID:-}" != "fedora" ]; then
+    die "This script is intended for Fedora Linux only. Detected ID='${ID:-unknown}'."
+  fi
+
+  info "Detected Fedora Linux ${VERSION_ID:-unknown}."
+}
+
+check_internet() {
+  log "Checking internet connectivity..."
+
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -fsI --connect-timeout 10 https://download.fedoraproject.org >/dev/null; then
+      die "Internet connectivity check failed."
+    fi
+  else
+    if ! sudo dnf -q makecache --refresh >/dev/null; then
+      die "Internet connectivity check failed."
+    fi
+  fi
+
+  info "Internet connection looks good."
+}
+
+package_installed() {
+  rpm -q "$1" >/dev/null 2>&1
+}
+
+package_available() {
+  local pkg="$1"
+  local output
+
+  output="$(dnf -q repoquery --available --qf '%{name}' "$pkg" 2>/dev/null || true)"
+  printf '%s\n' "$output" | grep -Fxq "$pkg"
+}
+
+install_required() {
+  sudo dnf install -y "$@"
+}
+
+install_pkg() {
+  local pkg="$1"
+
+  if package_installed "$pkg"; then
+    info "$pkg is already installed."
+    return 0
+  fi
+
+  if ! package_available "$pkg"; then
+    SKIPPED_PACKAGES+=("$pkg")
+
+    if [ "$SKIP_UNAVAILABLE" = "true" ]; then
+      warn "Package '$pkg' is unavailable in enabled repositories; skipping."
+      return 0
+    fi
+
+    die "Package '$pkg' is unavailable. Re-run with SKIP_UNAVAILABLE=true to skip unavailable packages."
+  fi
+
+  info "Installing $pkg..."
+
+  if sudo dnf install -y "$pkg"; then
+    record_installed "Package: $pkg"
+    return 0
+  fi
+
+  FAILED_PACKAGES+=("$pkg")
+
+  if [ "$SKIP_UNAVAILABLE" = "true" ]; then
+    warn "Package '$pkg' failed to install; skipping and continuing."
+    return 0
+  fi
+
+  die "Package '$pkg' failed to install. Re-run with SKIP_UNAVAILABLE=true to continue past failures."
+}
+
+install_pkg_list() {
+  local pkg
+
+  for pkg in "$@"; do
+    install_pkg "$pkg"
+  done
+}
+
+install_prerequisites() {
+  log "Preparing Fedora package tooling..."
+  info "Refreshing and upgrading the base system first."
+
+  sudo dnf upgrade --refresh -y
+
+  install_required \
+    dnf-plugins-core \
+    git \
+    git-lfs \
+    curl \
+    gcc \
+    gcc-c++ \
+    make \
+    ca-certificates
+
+  record_installed "Prerequisites installed"
+}
+
+enable_rpmfusion() {
+  log "Checking RPM Fusion repositories..."
+
+  local fedora_version
+  local rpmfusion_urls=()
+
+  fedora_version="$(rpm -E %fedora)"
+
+  if ! package_installed rpmfusion-free-release; then
+    rpmfusion_urls+=("https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_version}.noarch.rpm")
+  fi
+
+  if ! package_installed rpmfusion-nonfree-release; then
+    rpmfusion_urls+=("https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_version}.noarch.rpm")
+  fi
+
+  if [ "${#rpmfusion_urls[@]}" -eq 0 ]; then
+    info "RPM Fusion free and nonfree are already installed."
+  else
+    info "Enabling RPM Fusion free and nonfree for Fedora $fedora_version."
+    sudo dnf install -y "${rpmfusion_urls[@]}"
+    record_installed "RPM Fusion free and nonfree repositories"
+  fi
+}
+
+enable_copr_if_missing() {
+  local repo_glob="$1"
+  local copr_name="$2"
+
+  log "Checking COPR: $copr_name"
+
+  if compgen -G "$repo_glob" >/dev/null; then
+    info "COPR $copr_name is already enabled."
+  else
+    info "Enabling COPR $copr_name."
+    sudo dnf copr enable -y "$copr_name"
+    record_installed "COPR: $copr_name"
+  fi
+}
+
+enable_coprs() {
+  enable_copr_if_missing "/etc/yum.repos.d/*lionheartp*Hyprland*.repo" "lionheartp/Hyprland"
+  enable_copr_if_missing "/etc/yum.repos.d/*monkeygold*nautilus-open-any-terminal*.repo" "monkeygold/nautilus-open-any-terminal"
+}
+
+refresh_repositories() {
+  log "Refreshing package metadata..."
+  sudo dnf makecache -y
+  info "Package metadata refreshed."
+}
+
+install_desktop_packages() {
+  log "Installing desktop packages..."
+  info "Unavailable packages will be skipped because SKIP_UNAVAILABLE=$SKIP_UNAVAILABLE."
+
+  local packages=(
+    niri
+    greetd
+    greetd-selinux
+    alacritty
+    fish
+    firefox
+    steam
+    xdg-desktop-portal
+    xdg-desktop-portal-gnome
+    xdg-user-dirs
+    fuzzel
+    wl-clipboard
+    grim
+    slurp
+    brightnessctl
+    playerctl
+    pavucontrol
+    pamixer
+    fzf
+    xwayland-satellite
+    gnome-text-editor
+    nautilus
+    nautilus-open-any-terminal
+    gnome-software
+    file-roller
+    loupe
+    evince
+    gnome-calculator
+    gnome-system-monitor
+    gnome-disk-utility
+    langpacks-sv
+    glibc-langpack-sv
+    jetbrains-mono-fonts
+    plymouth
+    plymouth-scripts
+    plymouth-system-theme
+    plymouth-theme-spinner
+    grubby
+    dracut
+    dnf-automatic
+  )
+
+  install_pkg_list "${packages[@]}"
+
+  record_installed "Niri/greetd desktop package set"
+}
+
+refresh_font_cache() {
+  log "Refreshing font cache..."
+
+  if command -v fc-cache >/dev/null 2>&1; then
+    fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1 || true
+    sudo fc-cache -f /usr/share/fonts >/dev/null 2>&1 || true
+    record_installed "Font cache refreshed"
+  else
+    warn "fc-cache was not found; JetBrains Mono may not appear until fontconfig cache is rebuilt."
+  fi
+}
+
+configure_nautilus_open_any_terminal() {
+  log "Configuring Nautilus open-any-terminal..."
+  info "Setting Alacritty as the terminal used by the Nautilus context menu."
+
+  if ! package_installed nautilus-open-any-terminal; then
+    warn "nautilus-open-any-terminal is not installed; skipping Nautilus terminal integration."
+    return 0
+  fi
+
+  if command -v glib-compile-schemas >/dev/null 2>&1 && [ -d /usr/share/glib-2.0/schemas ]; then
+    sudo glib-compile-schemas /usr/share/glib-2.0/schemas || true
+  fi
+
+  if command -v gsettings >/dev/null 2>&1; then
+    gsettings set com.github.stunkymonkey.nautilus-open-any-terminal terminal alacritty
+    gsettings set com.github.stunkymonkey.nautilus-open-any-terminal flatpak system
+    gsettings set com.github.stunkymonkey.nautilus-open-any-terminal new-tab false
+    record_installed "Nautilus open-any-terminal configured to use Alacritty"
+  else
+    warn "gsettings was not found; could not configure Nautilus open-any-terminal."
+  fi
+
+  if command -v nautilus >/dev/null 2>&1; then
+    nautilus -q >/dev/null 2>&1 || true
+  fi
+}
+
+install_bitwarden_rpm() {
+  log "Installing Bitwarden RPM..."
+  info "Downloading the official Bitwarden Linux RPM."
+
+  local tmp
+  local rpm_file
+
+  tmp="$(mktemp -d)"
+  rpm_file="$tmp/bitwarden.rpm"
+
+  if ! command -v curl >/dev/null 2>&1; then
+    warn "curl was not found; skipping Bitwarden RPM install."
+    rm -rf "$tmp"
+    return 0
+  fi
+
+  if curl -fL -o "$rpm_file" "$BITWARDEN_RPM_URL"; then
+    sudo dnf install -y "$rpm_file"
+    record_installed "Bitwarden installed from official RPM"
+  else
+    warn "Failed to download Bitwarden RPM from $BITWARDEN_RPM_URL."
+  fi
+
+  rm -rf "$tmp"
+}
+
+remove_old_noctalia_v4_packages() {
+  log "Removing old Noctalia v4/Quickshell packages if present..."
+
+  local old_packages=(
+    noctalia-shell
+    noctalia-qs
+  )
+  local installed_old=()
+  local pkg
+
+  for pkg in "${old_packages[@]}"; do
+    if package_installed "$pkg"; then
+      installed_old+=("$pkg")
+    fi
+  done
+
+  if [ "${#installed_old[@]}" -gt 0 ]; then
+    info "Removing old Noctalia v4 packages: ${installed_old[*]}"
+    sudo dnf remove -y "${installed_old[@]}"
+    record_installed "Removed old Noctalia v4/Quickshell packages"
+  else
+    info "No old Noctalia v4/Quickshell packages found."
+  fi
+}
+
+remove_old_polkit_agents() {
+  log "Removing standalone polkit authentication agents..."
+
+  local old_packages=(
+    polkit-gnome
+    lxqt-policykit
+    mate-polkit
+    polkit-kde
+    polkit-kde-agent
+    polkit-kde-agent-1
+  )
+  local installed_old=()
+  local pkg
+
+  for pkg in "${old_packages[@]}"; do
+    if package_installed "$pkg"; then
+      installed_old+=("$pkg")
+    fi
+  done
+
+  if [ "${#installed_old[@]}" -gt 0 ]; then
+    info "Removing standalone agents: ${installed_old[*]}"
+    sudo dnf remove -y "${installed_old[@]}"
+    record_installed "Removed standalone polkit authentication agents"
+  else
+    info "No standalone polkit authentication agents found."
+  fi
+}
+
+install_noctalia_v5_packages() {
+  log "Installing Noctalia v5..."
+  info "Noctalia v5 provides the shell. Noctalia Greeter provides the login screen."
+
+  install_pkg noctalia-git
+  install_pkg noctalia-greeter
+
+  if command -v noctalia >/dev/null 2>&1; then
+    info "Noctalia command found: $(command -v noctalia)"
+  else
+    warn "Noctalia command 'noctalia' was not found in PATH."
+  fi
+
+  if command -v noctalia-greeter-session >/dev/null 2>&1; then
+    info "Noctalia Greeter session found: $(command -v noctalia-greeter-session)"
+  else
+    warn "noctalia-greeter-session was not found in PATH."
+  fi
+
+  record_installed "Noctalia v5 package install attempted"
+}
+
+remove_previous_cursor_packages() {
+  log "Removing previous La Capitaine cursor packages if present..."
+
+  local old_packages=(
+    la-capitaine-cursor-theme
+    capitaine-cursors
+    capitaine-cursors-theme
+  )
+  local installed_old=()
+  local pkg
+
+  for pkg in "${old_packages[@]}"; do
+    if package_installed "$pkg"; then
+      installed_old+=("$pkg")
+    fi
+  done
+
+  if [ "${#installed_old[@]}" -gt 0 ]; then
+    info "Removing previous cursor packages: ${installed_old[*]}"
+    sudo dnf remove -y "${installed_old[@]}"
+    record_installed "Removed previous La Capitaine cursor packages"
+  else
+    info "No previous La Capitaine cursor packages found."
+  fi
+}
+
+install_mcmojave_cursors() {
+  log "Installing McMojave cursors..."
+  info "Installing system-wide so the greeter user can see the cursor theme."
+
+  local tmp
+  local repo_dir
+  local src
+  local dest
+
+  tmp="$(mktemp -d)"
+  repo_dir="$tmp/McMojave-cursors"
+  dest="/usr/share/icons/McMojave-cursors"
+
+  git clone --depth 1 --branch "$MCMOJAVE_REPO_BRANCH" "$MCMOJAVE_REPO_URL" "$repo_dir"
+
+  src="$repo_dir/dist"
+
+  if [ ! -d "$src" ]; then
+    rm -rf "$tmp"
+    die "McMojave cursor repository does not contain expected dist directory."
+  fi
+
+  if [ -e "$dest" ]; then
+    sudo cp -a "$dest" "${dest}.bak.$(date +%Y%m%d-%H%M%S)"
+    info "Backed up existing $dest."
+  fi
+
+  sudo rm -rf "$dest"
+  sudo cp -a "$src" "$dest"
+  sudo chmod -R a+rX "$dest"
+
+  rm -rf "$tmp"
+
+  record_installed "McMojave cursors installed system-wide to /usr/share/icons/McMojave-cursors"
+}
+
+update_grub_default_setting() {
+  local key="$1"
+  local value="$2"
+  local file="/etc/default/grub"
+
+  if [ ! -f "$file" ]; then
+    warn "$file not found; cannot set $key."
+    return 0
+  fi
+
+  if grep -Eq "^${key}=" "$file"; then
+    sudo sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" | sudo tee -a "$file" >/dev/null
+  fi
+}
+
+regenerate_grub_config() {
+  log "Regenerating GRUB config..."
+
+  if command -v grub2-mkconfig >/dev/null 2>&1; then
+    sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+    record_installed "GRUB config regenerated"
+  else
+    warn "grub2-mkconfig was not found; GRUB config was not regenerated."
+  fi
+}
+
+install_grub2_tela_theme() {
+  log "Installing GRUB2 Tela theme..."
+  info "Theme: $GRUB2_THEME_NAME"
+  info "Resolution: $GRUB2_THEME_RESOLUTION"
+  info "Timeout: ${GRUB_TIMEOUT_SECONDS}s"
+
+  if ! command -v git >/dev/null 2>&1; then
+    warn "git was not found; skipping GRUB2 Tela theme installation."
+    return 0
+  fi
+
+  local tmp
+  local repo_dir
+
+  tmp="$(mktemp -d)"
+  repo_dir="$tmp/grub2-themes"
+
+  git clone --depth 1 --branch "$GRUB2_THEMES_REPO_BRANCH" "$GRUB2_THEMES_REPO_URL" "$repo_dir"
+
+  if [ ! -x "$repo_dir/install.sh" ]; then
+    rm -rf "$tmp"
+    warn "grub2-themes install.sh was not found or not executable; skipping GRUB theme installation."
+    return 0
+  fi
+
+  (
+    cd "$repo_dir"
+    sudo ./install.sh -t "$GRUB2_THEME_NAME" -c "$GRUB2_THEME_RESOLUTION"
+  )
+
+  update_grub_default_setting "GRUB_TIMEOUT" "$GRUB_TIMEOUT_SECONDS"
+  update_grub_default_setting "GRUB_TIMEOUT_STYLE" "menu"
+  update_grub_default_setting "GRUB_GFXMODE" "\"${GRUB2_THEME_RESOLUTION}x32\""
+  update_grub_default_setting "GRUB_GFXPAYLOAD_LINUX" "keep"
+
+  regenerate_grub_config
+
+  rm -rf "$tmp"
+
+  record_installed "GRUB2 Tela theme installed at ${GRUB2_THEME_RESOLUTION} with timeout ${GRUB_TIMEOUT_SECONDS}s"
+}
+
+configure_plymouth() {
+  log "Configuring Plymouth boot splash..."
+
+  if [ "$ENABLE_PLYMOUTH_SPLASH" != "true" ]; then
+    info "Plymouth packages are installed, but graphical splash boot is disabled."
+    info "Removing rhgb quiet so boot messages remain visible."
+
+    if command -v grubby >/dev/null 2>&1; then
+      sudo grubby --update-kernel=ALL --remove-args="rhgb quiet splash" || true
+      record_installed "Plymouth graphical boot args removed or kept disabled"
+    else
+      warn "grubby was not found; could not remove rhgb quiet kernel arguments."
+    fi
+
+    return 0
+  fi
+
+  info "Setting Plymouth theme to spinner and enabling quiet graphical boot."
+  info "This runs after GRUB theme installation so rhgb quiet is applied last."
+
+  if ! command -v plymouth-set-default-theme >/dev/null 2>&1; then
+    warn "plymouth-set-default-theme was not found; skipping Plymouth configuration."
+    return 0
+  fi
+
+  if plymouth-set-default-theme --list 2>/dev/null | grep -Fxq spinner; then
+    sudo plymouth-set-default-theme spinner -R
+    record_installed "Plymouth theme set to spinner and initramfs rebuilt"
+  else
+    warn "Plymouth spinner theme is not available; skipping Plymouth theme selection."
+    return 0
+  fi
+
+  if command -v grubby >/dev/null 2>&1; then
+    sudo grubby --update-kernel=ALL --remove-args="rhgb quiet splash" || true
+    sudo grubby --update-kernel=ALL --args="rhgb quiet"
+    record_installed "Kernel boot arguments include rhgb quiet"
+  else
+    warn "grubby was not found; could not add rhgb quiet kernel arguments."
+  fi
+
+  local active_theme
+  active_theme="$(plymouth-set-default-theme 2>/dev/null || true)"
+
+  if [ "$active_theme" = "spinner" ]; then
+    info "Plymouth active theme: spinner"
+  else
+    warn "Plymouth active theme appears to be '$active_theme', not 'spinner'."
+  fi
+}
+
+configure_update_notifier() {
+  log "Configuring update checks..."
+  info "Using dnf-automatic in notify-only mode. It will not install updates automatically."
+
+  if ! package_installed dnf-automatic; then
+    warn "dnf-automatic is not installed; skipping update notifier configuration."
+    return 0
+  fi
+
+  if [ -f /etc/dnf/automatic.conf ]; then
+    sudo cp -a /etc/dnf/automatic.conf "/etc/dnf/automatic.conf.bak.$(date +%Y%m%d-%H%M%S)"
+    info "Backed up /etc/dnf/automatic.conf."
+  fi
+
+  sudo tee /etc/dnf/automatic.conf >/dev/null <<'EOF'
+[commands]
+upgrade_type = default
+random_sleep = 300
+network_online_timeout = 60
+download_updates = no
+apply_updates = no
+
+[emitters]
+emit_via = motd
+
+[base]
+debuglevel = 1
+EOF
+
+  if systemctl list-unit-files dnf-automatic-notifyonly.timer >/dev/null 2>&1; then
+    sudo systemctl enable --now dnf-automatic-notifyonly.timer
+    record_installed "dnf-automatic notify-only update checks enabled"
+  elif systemctl list-unit-files dnf-automatic.timer >/dev/null 2>&1; then
+    sudo systemctl enable --now dnf-automatic.timer
+    record_installed "dnf-automatic timer enabled"
+  else
+    warn "No dnf-automatic timer unit found; update notifier was configured but not enabled."
+  fi
+}
+
+configure_swedish_locale_and_keyboard() {
+  log "Configuring Swedish locale and keyboard..."
+  info "System locale and keyboard are handled by Fedora, not by the Niri config."
+
+  if command -v localectl >/dev/null 2>&1; then
+    sudo localectl set-keymap sv-latin1
+    sudo localectl set-x11-keymap se
+    sudo localectl set-locale LANG=sv_SE.UTF-8 || warn "Could not set system locale to sv_SE.UTF-8."
+  else
+    warn "localectl not found; skipping system keyboard/locale configuration."
+  fi
+
+  if command -v xdg-user-dirs-update >/dev/null 2>&1; then
+    LANG=sv_SE.UTF-8 xdg-user-dirs-update
+    record_installed "XDG user directories updated for Swedish locale"
+  else
+    warn "xdg-user-dirs-update not found; user folders may not be localized."
+  fi
+
+  record_installed "Swedish console, X11 keyboard layout, and system locale"
+}
+
+install_fisher_and_plugins() {
+  log "Configuring Fish shell..."
+  info "Installing Fisher, fzf.fish, and z."
+
+  if ! command -v fish >/dev/null 2>&1 && ! [ -x /usr/bin/fish ]; then
+    warn "Fish is not installed; skipping Fisher and Fish plugins."
+    return 0
+  fi
+
+  mkdir -p "$HOME/.config/fish"
+
+  if ! fish -lc 'functions -q fisher' >/dev/null 2>&1; then
+    fish -lc 'curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher'
+  else
+    info "Fisher is already installed."
+  fi
+
+  fish -lc 'fisher install jorgebucaran/fisher PatrickF1/fzf.fish jethrokuan/z'
+
+  if [ "$INSTALL_TIDE" = "true" ]; then
+    fish -lc 'fisher install IlanCosman/tide@v6'
+    record_installed "Optional Fish plugin: Tide"
+  else
+    info "Skipping Tide. Set INSTALL_TIDE=true to install it."
+  fi
+
+  if [ "$SET_FISH_DEFAULT" = "true" ]; then
+    info "Setting Fish as the default shell."
+    chsh -s /usr/bin/fish
+    record_installed "Fish set as default shell"
+  else
+    info "Not changing the default shell. Set SET_FISH_DEFAULT=true to opt in."
+  fi
+
+  record_installed "Fisher, fzf.fish, and z"
+}
+
+clone_linux_niri_repo() {
+  local target="$1"
+
+  log "Cloning Linux Niri repo..."
+  info "Repository: $NIRI_REPO_URL"
+  info "Branch: $NIRI_REPO_BRANCH"
+
+  git clone --depth 1 --branch "$NIRI_REPO_BRANCH" "$NIRI_REPO_URL" "$target"
+
+  if command -v git-lfs >/dev/null 2>&1; then
+    log "Pulling Git LFS files..."
+    git -C "$target" lfs install --local >/dev/null 2>&1 || true
+    git -C "$target" lfs pull || warn "git-lfs pull failed; large wallpaper files may be incomplete."
+  else
+    warn "git-lfs is not installed; large wallpaper files may not be downloaded correctly."
+  fi
+}
+
+install_repo_niri_config_from_clone() {
+  local repo_dir="$1"
+
+  if [ "$INSTALL_REPO_NIRI_CONFIG" != "true" ]; then
+    warn "INSTALL_REPO_NIRI_CONFIG=false; skipping GitHub Niri config installation."
+    return 0
+  fi
+
+  log "Installing Niri config from GitHub..."
+
+  local src="$repo_dir/niri"
+  local dest="$HOME/.config/niri"
+
+  if [ ! -f "$src/config.kdl" ] || [ ! -d "$src/cfg" ]; then
+    die "Repository does not contain expected niri/config.kdl and niri/cfg directory."
+  fi
+
+  mkdir -p "$HOME/.config"
+  backup_path "$dest"
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  cp -a "$src/." "$dest/"
+
+  record_installed "Niri config copied from GitHub repo"
+}
+
+install_repo_alacritty_config_from_clone() {
+  local repo_dir="$1"
+
+  if [ "$INSTALL_REPO_ALACRITTY_CONFIG" != "true" ]; then
+    warn "INSTALL_REPO_ALACRITTY_CONFIG=false; skipping GitHub Alacritty config installation."
+    return 0
+  fi
+
+  log "Installing Alacritty config from GitHub..."
+
+  local src="$repo_dir/alacritty"
+  local dest="$HOME/.config/alacritty"
+
+  if [ ! -d "$src" ]; then
+    warn "Repository does not contain expected alacritty directory; skipping Alacritty config copy."
+    return 0
+  fi
+
+  mkdir -p "$HOME/.config"
+  backup_path "$dest"
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  cp -a "$src/." "$dest/"
+
+  record_installed "Alacritty config copied from GitHub repo"
+}
+
+install_repo_noctalia_config_from_clone() {
+  local repo_dir="$1"
+
+  if [ "$INSTALL_REPO_NOCTALIA_CONFIG" != "true" ]; then
+    warn "INSTALL_REPO_NOCTALIA_CONFIG=false; skipping GitHub Noctalia config installation."
+    return 0
+  fi
+
+  log "Installing Noctalia config from GitHub..."
+
+  local src="$repo_dir/noctalia"
+  local dest="$HOME/.config/noctalia"
+
+  if [ ! -d "$src" ]; then
+    die "Repository does not contain expected noctalia directory."
+  fi
+
+  mkdir -p "$HOME/.config"
+  backup_path "$dest"
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  cp -a "$src/." "$dest/"
+
+  record_installed "Noctalia config copied from GitHub repo"
+}
+
+resolve_pictures_dir() {
+  local pictures_dir=""
+
+  if command -v xdg-user-dir >/dev/null 2>&1; then
+    pictures_dir="$(xdg-user-dir PICTURES 2>/dev/null || true)"
+  fi
+
+  if [ -z "$pictures_dir" ] || [ "$pictures_dir" = "$HOME" ]; then
+    if printf '%s\n' "${LANG:-}" | grep -q '^sv_SE'; then
+      pictures_dir="$HOME/Bilder"
+    else
+      pictures_dir="$HOME/Pictures"
+    fi
+  fi
+
+  printf '%s\n' "$pictures_dir"
+}
+
+install_repo_wallpapers_from_clone() {
+  local repo_dir="$1"
+
+  if [ "$INSTALL_REPO_WALLPAPERS" != "true" ]; then
+    warn "INSTALL_REPO_WALLPAPERS=false; skipping wallpaper installation."
+    return 0
+  fi
+
+  log "Installing wallpapers from GitHub..."
+
+  local src="$repo_dir/wallpapers"
+  local pictures_dir
+  local dest
+  local copied_count
+
+  if [ ! -d "$src" ]; then
+    warn "Repository does not contain expected wallpapers directory; skipping wallpaper copy."
+    return 0
+  fi
+
+  pictures_dir="$(resolve_pictures_dir)"
+  dest="$pictures_dir/wallpapers"
+
+  info "Source: $src"
+  info "Destination: $dest"
+
+  mkdir -p "$pictures_dir"
+  backup_path "$dest"
+  rm -rf "$dest"
+  mkdir -p "$dest"
+
+  cp -a "$src/." "$dest/"
+
+  copied_count="$(find "$dest" -type f | wc -l | tr -d ' ')"
+
+  if [ "$copied_count" = "0" ]; then
+    warn "No wallpaper files were copied to $dest."
+  else
+    info "Copied $copied_count wallpaper file(s)."
+  fi
+
+  if find "$dest" -type f -size -2k -exec grep -Iq 'version https://git-lfs.github.com/spec/v1' {} \; -print | grep -q .; then
+    warn "Some wallpaper files look like Git LFS pointer files. Make sure git-lfs is installed and rerun the script."
+  fi
+
+  record_installed "Wallpapers copied from GitHub repo to $dest"
+}
+
+install_repo_configs() {
+  log "Copying repo config files..."
+  info "Niri, Alacritty, and wallpapers are copied from $NIRI_REPO_URL."
+
+  local tmp
+  local repo_dir
+
+  tmp="$(mktemp -d)"
+  repo_dir="$tmp/linux-niri"
+
+  clone_linux_niri_repo "$repo_dir"
+  install_repo_niri_config_from_clone "$repo_dir"
+  install_repo_alacritty_config_from_clone "$repo_dir"
+  install_repo_noctalia_config_from_clone "$repo_dir"
+  install_repo_wallpapers_from_clone "$repo_dir"
+
+  rm -rf "$tmp"
+}
+
+update_niri_autostart_for_noctalia_v5() {
+  if [ "$INSTALL_REPO_NIRI_CONFIG" != "true" ]; then
+    warn "INSTALL_REPO_NIRI_CONFIG=false; skipping Niri autostart update for Noctalia v5."
+    return 0
+  fi
+
+  log "Updating Niri autostart for Noctalia v5..."
+  info "Replacing old Noctalia v4/Quickshell startup with: spawn-at-startup \"noctalia\""
+
+  local niri_dir="$HOME/.config/niri"
+  local autostart_file="$niri_dir/cfg/autostart.kdl"
+  local fallback_file="$niri_dir/config.kdl"
+  local target_file
+
+  if [ -f "$autostart_file" ]; then
+    target_file="$autostart_file"
+  elif [ -f "$fallback_file" ]; then
+    target_file="$fallback_file"
+    warn "No ~/.config/niri/cfg/autostart.kdl found; updating ~/.config/niri/config.kdl instead."
+  else
+    warn "No Niri config file found to update for Noctalia v5 autostart."
+    return 0
+  fi
+
+  backup_path "$target_file"
+
+  if grep -Eq '^[[:space:]]*spawn-at-startup[[:space:]]+"noctalia"' "$target_file"; then
+    info "Noctalia v5 autostart already exists in $target_file."
+  else
+    local tmp
+    tmp="$(mktemp)"
+
+    grep -Ev \
+      '^[[:space:]]*spawn-at-startup[[:space:]]+.*(noctalia-shell|noctalia-qs|"qs"[[:space:]]+"-c"[[:space:]]+"noctalia|quickshell.*noctalia)' \
+      "$target_file" >"$tmp"
+
+    cat >>"$tmp" <<'EOF'
+
+// Noctalia v5
+spawn-at-startup "noctalia"
+EOF
+
+    mv "$tmp" "$target_file"
+    info "Added Noctalia v5 autostart to $target_file."
+  fi
+
+  if command -v niri >/dev/null 2>&1; then
+    if niri validate -c "$niri_dir/config.kdl" >/dev/null 2>&1; then
+      info "Niri config validates successfully."
+    elif niri validate "$niri_dir/config.kdl" >/dev/null 2>&1; then
+      info "Niri config validates successfully."
+    else
+      warn "Niri config validation failed. Run: niri validate -c ~/.config/niri/config.kdl"
+    fi
+  else
+    warn "niri command not found; skipping Niri config validation."
+  fi
+
+  record_installed "Niri autostart updated for Noctalia v5"
+}
+
+ensure_greeter_user() {
+  if id greeter >/dev/null 2>&1; then
+    info "User 'greeter' already exists."
+    return 0
+  fi
+
+  info "Creating system user 'greeter'."
+
+  sudo useradd \
+    --system \
+    --no-create-home \
+    --home-dir /var/lib/greetd \
+    --shell /usr/sbin/nologin \
+    greeter
+
+  record_installed "Created greeter system user"
+}
+
+configure_noctalia_greeter() {
+  log "Configuring greetd with Noctalia Greeter..."
+  info "greetd will show Noctalia Greeter and default to the Niri session."
+
+  local greeter_session
+  local niri_session_file_found
+
+  if ! package_installed greetd; then
+    warn "greetd is not installed; skipping greetd configuration."
+    return 0
+  fi
+
+  greeter_session="$(command -v noctalia-greeter-session || true)"
+
+  if [ -z "$greeter_session" ]; then
+    warn "noctalia-greeter-session was not found; skipping greetd Noctalia Greeter configuration."
+    warn "Install noctalia-greeter, then configure /etc/greetd/config.toml manually."
+    return 0
+  fi
+
+  ensure_greeter_user
+
+  if compgen -G "/usr/share/wayland-sessions/*niri*.desktop" >/dev/null; then
+    niri_session_file_found="true"
+  else
+    niri_session_file_found="false"
+    warn "No Niri session file found in /usr/share/wayland-sessions. Noctalia Greeter may not list Niri."
+  fi
+
+  sudo mkdir -p /etc/greetd
+  sudo mkdir -p /var/lib/greetd
+  sudo mkdir -p /var/lib/noctalia-greeter
+  sudo mkdir -p /var/log
+
+  sudo touch /var/log/noctalia-greeter.log
+  sudo touch /var/lib/noctalia-greeter/greeter.log
+  sudo chown -R greeter:greeter /var/lib/greetd 2>/dev/null || true
+  sudo chown -R greeter:greeter /var/lib/noctalia-greeter 2>/dev/null || true
+  sudo chown greeter:greeter /var/log/noctalia-greeter.log 2>/dev/null || true
+
+  if [ -f /etc/greetd/config.toml ]; then
+    sudo cp -a /etc/greetd/config.toml "/etc/greetd/config.toml.bak.$(date +%Y%m%d-%H%M%S)"
+    info "Backed up /etc/greetd/config.toml."
+  fi
+
+  sudo tee /etc/greetd/config.toml >/dev/null <<EOF
+[terminal]
+vt = 1
+
+[default_session]
+command = "$greeter_session -- --session niri"
+user = "greeter"
+EOF
+
+  if [ -f /var/lib/noctalia-greeter/greeter.conf ]; then
+    sudo cp -a /var/lib/noctalia-greeter/greeter.conf "/var/lib/noctalia-greeter/greeter.conf.bak.$(date +%Y%m%d-%H%M%S)"
+    info "Backed up /var/lib/noctalia-greeter/greeter.conf."
+  fi
+
+  sudo tee /var/lib/noctalia-greeter/greeter.conf >/dev/null <<'EOF'
+keyboard_layout="se"
+cursor_theme="McMojave-cursors"
+cursor_size=24
+default_session="niri"
+EOF
+
+  sudo chown -R greeter:greeter /var/lib/noctalia-greeter 2>/dev/null || true
+
+  info "Disabling other display managers if they are present."
+  sudo systemctl disable sddm 2>/dev/null || true
+  sudo systemctl disable gdm 2>/dev/null || true
+  sudo systemctl disable lightdm 2>/dev/null || true
+  sudo systemctl disable lxdm 2>/dev/null || true
+  sudo systemctl disable ly 2>/dev/null || true
+
+  sudo rm -rf /etc/sddm.conf.d
+  sudo rm -rf /etc/systemd/system/sddm.service.d
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable greetd
+  sudo systemctl set-default graphical.target
+
+  if [ "$niri_session_file_found" = "true" ]; then
+    record_installed "greetd enabled with Noctalia Greeter and Niri as default session"
+  else
+    record_installed "greetd enabled with Noctalia Greeter; Niri session file not found"
+  fi
+}
+
+print_summary() {
+  printf '\n╭──────────────────────────────────────────────╮\n'
+  printf '│ Installation summary                          │\n'
+  printf '╰──────────────────────────────────────────────╯\n'
+
+  local item
+
+  if [ "${#INSTALLED[@]}" -gt 0 ]; then
+    printf '\nCompleted:\n'
+    for item in "${INSTALLED[@]}"; do
+      printf ' - %s\n' "$item"
+    done
+  fi
+
+  if [ "${#SKIPPED_PACKAGES[@]}" -gt 0 ]; then
+    printf '\nSkipped unavailable packages/features:\n'
+    for item in "${SKIPPED_PACKAGES[@]}"; do
+      printf ' - %s\n' "$item"
+    done
+  fi
+
+  if [ "${#FAILED_PACKAGES[@]}" -gt 0 ]; then
+    printf '\nPackages that failed to install:\n'
+    for item in "${FAILED_PACKAGES[@]}"; do
+      printf ' - %s\n' "$item"
+    done
+  fi
+
+  if [ "${#WARNINGS[@]}" -gt 0 ]; then
+    printf '\nWarnings:\n'
+    for item in "${WARNINGS[@]}"; do
+      printf ' - %s\n' "$item"
+    done
+  fi
+
+  cat <<'EOF'
+
+What happened:
+
+ - Niri was installed and configured from the GitHub repo.
+ - Alacritty config was copied from the GitHub repo.
+ - JetBrains Mono was installed for Alacritty.
+ - Nautilus open-any-terminal was installed and configured to use Alacritty.
+ - GNOME Software was installed.
+ - Bitwarden was installed from the official RPM.
+ - Wallpapers were copied from the GitHub repo into the localized Pictures folder.
+ - Git LFS was used for repo files when available.
+ - Noctalia v5 was installed through noctalia-git.
+ - Niri autostart was updated to run: noctalia
+ - Noctalia Greeter was wired into greetd.
+ - Old standalone polkit agents were removed.
+ - McMojave cursors were installed system-wide.
+ - GRUB2 Tela theme was installed at 3440x1440 with a 10 second timeout.
+ - Plymouth spinner boot splash was configured after GRUB with rhgb quiet.
+ - dnf-automatic was configured for notify-only update checks.
+ - Swedish locale and keyboard settings were applied.
+
+Useful paths:
+
+  Niri config:       ~/.config/niri
+  Alacritty config:  ~/.config/alacritty
+  Wallpapers:        ~/Bilder/wallpapers or ~/Pictures/wallpapers
+  Cursors:           /usr/share/icons/McMojave-cursors
+  greetd config:     /etc/greetd/config.toml
+  GRUB defaults:     /etc/default/grub
+  GRUB config:       /boot/grub2/grub.cfg
+
+Verify Plymouth:
+
+  plymouth-set-default-theme
+  cat /proc/cmdline
+
+Expected Plymouth theme:
+
+  spinner
+
+Expected kernel args:
+
+  rhgb quiet
+
+Expected boot flow:
+
+  GRUB Tela menu -> Fedora Plymouth spinner -> Noctalia Greeter
+
+Next step:
+
+  sudo reboot
+
+Or start greetd manually:
+
+  sudo systemctl start greetd
+
+The script did not reboot the system and did not force-start greetd.
+EOF
+}
+
+main() {
+  banner
+
+  require_not_root
+  check_fedora
+  require_sudo
+  check_internet
+
+  install_prerequisites
+  enable_rpmfusion
+  enable_coprs
+  refresh_repositories
+
+  install_desktop_packages
+  refresh_font_cache
+  configure_nautilus_open_any_terminal
+  install_bitwarden_rpm
+  remove_old_noctalia_v4_packages
+  install_noctalia_v5_packages
+  remove_old_polkit_agents
+  remove_previous_cursor_packages
+  install_mcmojave_cursors
+  install_grub2_tela_theme
+  configure_plymouth
+  configure_update_notifier
+
+  configure_swedish_locale_and_keyboard
+  install_fisher_and_plugins
+  install_repo_configs
+  update_niri_autostart_for_noctalia_v5
+  configure_noctalia_greeter
+
+  print_summary
+}
+
+main "$@"
