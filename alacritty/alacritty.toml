@@ -1,0 +1,63 @@
+[env]
+TERM = "alacritty"
+WINIT_UNIX_BACKEND = "wayland"
+
+[window]
+padding = { x = 14, y = 14 }
+dynamic_padding = true
+decorations = "None"
+opacity = 0.88
+
+[font]
+size = 12.0
+normal = { family = "JetBrains Mono", style = "Regular" }
+bold = { family = "JetBrains Mono", style = "Bold" }
+italic = { family = "JetBrains Mono", style = "Italic" }
+bold_italic = { family = "JetBrains Mono", style = "Bold Italic" }
+offset = { x = 0, y = 2 }
+glyph_offset = { x = 0, y = 0 }
+builtin_box_drawing = true
+
+
+[selection]
+save_to_clipboard = true
+
+[mouse]
+hide_when_typing = true
+
+[keyboard]
+bindings = [
+  { key = "V", mods = "Control|Shift", action = "Paste" },
+  { key = "C", mods = "Control|Shift", action = "Copy" },
+  { key = "N", mods = "Control|Shift", action = "CreateNewWindow" },
+  { key = "Equals", mods = "Control", action = "IncreaseFontSize" },
+  { key = "Minus", mods = "Control", action = "DecreaseFontSize" },
+  { key = "Key0", mods = "Control", action = "ResetFontSize" }
+]
+
+[colors.primary]
+background = "0x1e1e2e"
+foreground = "0xcdd6f4"
+
+[colors.cursor]
+cursor = "0xf5c2e7"
+
+[colors.normal]
+black = "0x45475a"
+red = "0xf38ba8"
+green = "0xa6e3a1"
+yellow = "0xf9e2af"
+blue = "0x89b4fa"
+magenta = "0xf5c2e7"
+cyan = "0x94e2d5"
+white = "0xbac2de"
+
+[colors.bright]
+black = "0x585b70"
+red = "0xf38ba8"
+green = "0xa6e3a1"
+yellow = "0xf9e2af"
+blue = "0x89b4fa"
+magenta = "0xf5c2e7"
+cyan = "0x94e2d5"
+white = "0xa6adc8"
