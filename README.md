@@ -13,7 +13,7 @@ Current release note: `v1.1` adds Nautilus SMB share browsing support and `.loca
 - Enables `multilib` when needed for Steam.
 - Installs official Arch packages for Niri, greetd, Alacritty, JetBrains Mono, Fish, Firefox, GitHub CLI, Steam, GPU-matched Steam Vulkan providers, Xwayland Satellite, Nautilus, Nautilus SMB browsing support, GNOME Software, Bitwarden, Plymouth, Snapper support, GNOME utilities, portals, Avahi `.local` discovery, and PipeWire audio support.
 - Bootstraps Paru from the AUR if Paru is missing.
-- Installs configurable AUR packages for Noctalia v5, Noctalia Greeter, McMojave cursors, Visual Studio Code, and `nautilus-open-any-terminal`.
+- Installs configurable AUR packages for Noctalia v5, Noctalia Greeter, McMojave cursors, Visual Studio Code, `nautilus-open-any-terminal`, and `lsfg-vk-git`.
 - Installs Polaris from the upstream Arch release package, runs `sudo polaris --setup-host`, writes recommended Headless Stream defaults, and tries to enable the Polaris user service.
 - Clones or updates `https://github.com/socawi-ai/linux-niri`.
 - Installs Alacritty, Niri, and optional Noctalia config from the repo's `noctalia` directory into the selected target user's home directory.
@@ -82,6 +82,7 @@ Common variables:
 - `AUR_PACKAGE_NAUTILUS_OPEN_ANY_TERMINAL`: defaults to `nautilus-open-any-terminal-git`
 - `AUR_PACKAGE_MCMOJAVE_CURSORS`: defaults to `mcmojave-cursors`
 - `AUR_PACKAGE_VSCODE`: defaults to `visual-studio-code-bin`
+- `AUR_PACKAGE_LSFG_VK`: defaults to `lsfg-vk-git`
 - `NOCTALIA_GREETER_SESSION_BIN`: defaults to `/usr/bin/noctalia-greeter-session`
 - `NOCTALIA_GREETER_COMMAND`: defaults to `/usr/bin/noctalia-greeter-session -- --session niri`
 - `GREETD_USER`: defaults to `greeter`
