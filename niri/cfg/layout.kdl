@@ -5,15 +5,24 @@ layout {
 
     background-color "transparent"
 
+    // 4 columns exactly fit the output width
     default-column-width {
-        proportion 0.33333
+        proportion 0.25
     }
 
     preset-column-widths {
+        // 4 columns
+        proportion 0.25
+
+        // 3 columns
         proportion 0.33333
+
+        // 2 columns
         proportion 0.5
+
+        // large focused column
         proportion 0.66667
-        proportion 0.8
+        proportion 0.75
     }
 
     preset-window-heights {
