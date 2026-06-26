@@ -1,45 +1,70 @@
 layout {
-    gaps 10
+    // 3440x1440 has enough room for breathing space.
+    // 16 is niri's default and feels better than 10 on ultrawide.
+    gaps 16
+
+    // Good scrolling behavior for ultrawide:
+    // don't constantly re-center, but center when columns overflow.
     center-focused-column "on-overflow"
     always-center-single-column
 
     background-color "transparent"
 
-    // 4 columns exactly fit the output width
+    // Better default for 3440x1440:
+    // 1/3 gives ~1147px logical width before scale,
+    // which is comfortable for terminals, browsers, editors, chats, etc.
     default-column-width {
-        proportion 0.25
+        proportion 0.33333
     }
 
     preset-column-widths {
-        // 4 columns
+        // Dense 4-column mode: ~860px each on 3440px.
         proportion 0.25
 
-        // 3 columns
+        // Slightly wider compact column.
+        proportion 0.30
+
+        // Default 3-column mode.
         proportion 0.33333
 
-        // 2 columns
+        // Balanced 2-column split.
         proportion 0.5
 
-        // large focused column
+        // Main + side-column layouts.
+        proportion 0.60
         proportion 0.66667
+
+        // Big focused column for browsers/editors.
         proportion 0.75
+
+        // Almost monocle, but still leaves context visible.
+        proportion 0.85
     }
 
     preset-window-heights {
+        // Half-height stack.
         proportion 0.5
+
+        // Useful for terminals/chat/log windows.
+        proportion 0.66667
     }
 
+    // Use a visible focus ring on ultrawide so the active window is obvious.
+    // Fractional widths are valid; niri rounds them to physical pixels based on output scale. 
+    // Width 2 is more legible than 0.5 at 3440x1440.
     focus-ring {
         on
-        width 0.5
-        active-color "#cdd6f426"
+        width 2
+        active-color "#89b4fa80"
         inactive-color "#ffffff00"
     }
 
+    // Keep borders subtle. Border affects window size, focus-ring does not.
     border {
         on
         width 1
-        active-color "#cdd6f41a"
-        inactive-color "#ffffff03"
+        active-color "#cdd6f433"
+        inactive-color "#ffffff08"
+        urgent-color "#f38ba880"
     }
 }
