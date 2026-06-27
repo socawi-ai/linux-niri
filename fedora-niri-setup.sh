@@ -41,7 +41,8 @@ LIMINE_BOOT_LABEL="${LIMINE_BOOT_LABEL:-Fedora Limine}"
 LIMINE_TIMEOUT="${LIMINE_TIMEOUT:-5}"
 LIMINE_BOOT_ROOT="${LIMINE_BOOT_ROOT:-/boot}"
 LIMINE_CONFIG="${LIMINE_CONFIG:-$LIMINE_BOOT_ROOT/limine/limine.conf}"
-LIMINE_EFI_DIR="${LIMINE_EFI_DIR:-$LIMINE_BOOT_ROOT/EFI/Limine}"
+LIMINE_EFI_ROOT="${LIMINE_EFI_ROOT:-}"
+LIMINE_EFI_DIR="${LIMINE_EFI_DIR:-}"
 LIMINE_FALLBACK_EFI="${LIMINE_FALLBACK_EFI:-1}"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -899,6 +900,40 @@ limine_boot_path() {
   printf 'boot():%s\n' "$path"
 }
 
+resolve_limine_efi_paths() {
+  [[ "$ENABLE_LIMINE" == "1" ]] || return 0
+
+  if [[ -z "$LIMINE_EFI_ROOT" ]]; then
+    if [[ -d "$LIMINE_BOOT_ROOT/EFI" ]]; then
+      LIMINE_EFI_ROOT="$LIMINE_BOOT_ROOT/EFI"
+    elif [[ -d "$LIMINE_BOOT_ROOT/efi/EFI" ]]; then
+      LIMINE_EFI_ROOT="$LIMINE_BOOT_ROOT/efi/EFI"
+    elif [[ -d /boot/efi/EFI ]]; then
+      LIMINE_EFI_ROOT="/boot/efi/EFI"
+    elif [[ -d /efi/EFI ]]; then
+      LIMINE_EFI_ROOT="/efi/EFI"
+    else
+      local boot_fstype
+      boot_fstype="$(findmnt -no FSTYPE --target "$LIMINE_BOOT_ROOT" 2>/dev/null | head -n 1)"
+      case "$boot_fstype" in
+        vfat|fat|msdos)
+          LIMINE_EFI_ROOT="$LIMINE_BOOT_ROOT/EFI"
+          ;;
+        *)
+          die "Could not find an EFI directory. If /boot is your EFI system partition, it must be FAT/vfat or set LIMINE_EFI_ROOT=/boot/EFI explicitly."
+          ;;
+      esac
+    fi
+  fi
+
+  if [[ -z "$LIMINE_EFI_DIR" ]]; then
+    LIMINE_EFI_DIR="$LIMINE_EFI_ROOT/Limine"
+  fi
+
+  log "Limine EFI root: $LIMINE_EFI_ROOT"
+  log "Limine EFI directory: $LIMINE_EFI_DIR"
+}
+
 install_limine_packages() {
   [[ "$ENABLE_LIMINE" == "1" ]] || return 0
 
@@ -971,6 +1006,8 @@ write_limine_config_from_bls() {
 install_limine_efi_files() {
   [[ "$ENABLE_LIMINE" == "1" ]] || return 0
 
+  resolve_limine_efi_paths
+
   local limine_efi
   limine_efi="$(find_limine_efi_binary)"
 
@@ -979,9 +1016,9 @@ install_limine_efi_files() {
   run_sudo install -m 0644 "$limine_efi" "$LIMINE_EFI_DIR/limine.efi"
 
   if [[ "$LIMINE_FALLBACK_EFI" == "1" ]]; then
-    run_sudo install -d -m 0755 "$LIMINE_BOOT_ROOT/EFI/BOOT"
-    backup_system_path "$LIMINE_BOOT_ROOT/EFI/BOOT/BOOTX64.EFI"
-    run_sudo install -m 0644 "$limine_efi" "$LIMINE_BOOT_ROOT/EFI/BOOT/BOOTX64.EFI"
+    run_sudo install -d -m 0755 "$LIMINE_EFI_ROOT/BOOT"
+    backup_system_path "$LIMINE_EFI_ROOT/BOOT/BOOTX64.EFI"
+    run_sudo install -m 0644 "$limine_efi" "$LIMINE_EFI_ROOT/BOOT/BOOTX64.EFI"
     record_change "Installed Limine EFI binary to $LIMINE_EFI_DIR/limine.efi and fallback BOOTX64.EFI."
   else
     record_change "Installed Limine EFI binary to $LIMINE_EFI_DIR/limine.efi."
@@ -990,20 +1027,28 @@ install_limine_efi_files() {
 
 create_limine_uefi_entry() {
   [[ "$ENABLE_LIMINE" == "1" ]] || return 0
+  resolve_limine_efi_paths
 
   [[ -d /sys/firmware/efi ]] || {
     warn "This system does not appear to be booted in UEFI mode. Limine files were installed, but no UEFI boot entry was created."
     return 0
   }
 
+  local efi_mount
   local boot_source
   local boot_disk_name
   local boot_partnum
   local boot_disk
 
-  boot_source="$(findmnt -no SOURCE --target "$LIMINE_BOOT_ROOT" | head -n 1)"
+  efi_mount="$(findmnt -no TARGET --target "$LIMINE_EFI_ROOT" | head -n 1)"
+  [[ -n "$efi_mount" ]] || {
+    warn "Could not determine the EFI mount point for $LIMINE_EFI_ROOT; skipping efibootmgr entry creation."
+    return 0
+  }
+
+  boot_source="$(findmnt -no SOURCE --target "$efi_mount" | head -n 1)"
   [[ "$boot_source" == /dev/* ]] || {
-    warn "Could not determine a block device for $LIMINE_BOOT_ROOT; skipping efibootmgr entry creation."
+    warn "Could not determine a block device for EFI mount $efi_mount; skipping efibootmgr entry creation."
     return 0
   }
 
@@ -1021,10 +1066,11 @@ create_limine_uefi_entry() {
 
 disable_grub_efi_path() {
   [[ "$ENABLE_LIMINE" == "1" && "$REMOVE_GRUB_AFTER_LIMINE" == "1" ]] || return 0
+  resolve_limine_efi_paths
 
-  local grub_efi_dir="$LIMINE_BOOT_ROOT/EFI/fedora"
+  local grub_efi_dir="$LIMINE_EFI_ROOT/fedora"
   if [[ -e "$grub_efi_dir" ]]; then
-    local disabled_dir="$LIMINE_BOOT_ROOT/EFI/fedora.grub-disabled-$TIMESTAMP"
+    local disabled_dir="$LIMINE_EFI_ROOT/fedora.grub-disabled-$TIMESTAMP"
     backup_system_path "$grub_efi_dir"
     run_sudo mv "$grub_efi_dir" "$disabled_dir"
     record_change "Moved GRUB EFI directory out of the active path: $grub_efi_dir -> $disabled_dir."
@@ -1044,6 +1090,7 @@ configure_limine_bootloader() {
 
   log "Configuring Limine as the Fedora bootloader using $LIMINE_BOOT_ROOT."
   install_limine_packages
+  resolve_limine_efi_paths
   write_limine_config_from_bls
   install_limine_efi_files
   create_limine_uefi_entry
