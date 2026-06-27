@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+CONFIG_REPO_URL="${CONFIG_REPO_URL:-https://github.com/socawi-ai/linux-niri}"
+CONFIG_REPO_DIR_WAS_SET=0
+CONFIG_SOURCE_DIR_WAS_SET=0
+USER_BACKUP_ROOT_WAS_SET=0
+[[ -n "${CONFIG_REPO_DIR+x}" ]] && CONFIG_REPO_DIR_WAS_SET=1
+[[ -n "${CONFIG_SOURCE_DIR+x}" ]] && CONFIG_SOURCE_DIR_WAS_SET=1
+[[ -n "${USER_BACKUP_ROOT+x}" ]] && USER_BACKUP_ROOT_WAS_SET=1
+CONFIG_REPO_DIR="${CONFIG_REPO_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri}"
 CONFIG_SOURCE_DIR="${CONFIG_SOURCE_DIR:-}"
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-$USER}}"
 ASSUME_YES="${ASSUME_YES:-0}"
@@ -12,6 +20,8 @@ DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}
 NOCTALIA_COPR="${NOCTALIA_COPR:-lionheartp/Hyprland}"
 NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
 NOCTALIA_GREETER_PACKAGE="${NOCTALIA_GREETER_PACKAGE:-noctalia-greeter}"
+NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
+NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-10.jpg}"
 GREETD_USER="${GREETD_USER:-greeter}"
 NOCTALIA_GREETER_SESSION_BIN="${NOCTALIA_GREETER_SESSION_BIN:-}"
 
@@ -19,6 +29,8 @@ XKB_LAYOUT="${XKB_LAYOUT:-se}"
 GTK_COLOR_SCHEME="${GTK_COLOR_SCHEME:-prefer-dark}"
 GTK_THEME_NAME="${GTK_THEME_NAME:-Adwaita-dark}"
 GTK_APPLICATION_PREFER_DARK="${GTK_APPLICATION_PREFER_DARK:-1}"
+WALLPAPER_PARENT_DIR="${WALLPAPER_PARENT_DIR:-}"
+WALLPAPER_SUBDIR="${WALLPAPER_SUBDIR:-wallpapers}"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_FILE:-$HOME/fedora-niri-setup-$TIMESTAMP.log}"
@@ -148,12 +160,21 @@ resolve_target_user() {
   TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
   [[ -n "$TARGET_HOME" ]] || die "Could not determine home directory for $TARGET_USER."
 
-  if [[ -z "$CONFIG_SOURCE_DIR" ]]; then
-    CONFIG_SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ "$CONFIG_REPO_DIR_WAS_SET" == "0" ]]; then
+    CONFIG_REPO_DIR="$TARGET_HOME/.cache/fedora-niri-setup/linux-niri"
+  fi
+
+  if [[ "$USER_BACKUP_ROOT_WAS_SET" == "0" ]]; then
+    USER_BACKUP_ROOT="$TARGET_HOME/.local/share/fedora-niri-setup/backups/$TIMESTAMP"
+  fi
+
+  if [[ "$CONFIG_SOURCE_DIR_WAS_SET" == "0" ]]; then
+    CONFIG_SOURCE_DIR="$CONFIG_REPO_DIR"
   fi
 
   log "Target user: $TARGET_USER"
   log "Target home: $TARGET_HOME"
+  log "Config repo: $CONFIG_REPO_URL"
   log "Config source: $CONFIG_SOURCE_DIR"
 }
 
@@ -221,6 +242,23 @@ replace_user_path_with_dir() {
   record_change "Installed $(basename "$dest") config to $dest."
 }
 
+safe_rm_rf() {
+  local path="$1"
+  [[ -n "$path" && "$path" != "/" ]] || die "Refusing to remove unsafe path: $path"
+
+  case "$path" in
+    "$TARGET_HOME"/*)
+      run_as_user rm -rf -- "$path"
+      ;;
+    /tmp/*|/var/tmp/*|/private/tmp/*|/private/var/tmp/*)
+      rm -rf -- "$path"
+      ;;
+    *)
+      die "Refusing to remove $path because it is outside the expected user or temporary directories."
+      ;;
+  esac
+}
+
 write_user_file() {
   local path="$1"
   local mode="${2:-0644}"
@@ -231,6 +269,23 @@ write_user_file() {
   chmod 0644 "$tmp"
   run_as_user install -D -m "$mode" "$tmp" "$path"
   rm -f "$tmp"
+}
+
+replace_user_file() {
+  local src="$1"
+  local dest="$2"
+  [[ -f "$src" ]] || die "Expected file $src."
+
+  case "$dest" in
+    "$TARGET_HOME"/*) ;;
+    *) die "Refusing to replace path outside target home: $dest" ;;
+  esac
+
+  backup_user_path "$dest"
+  run_as_user rm -f "$dest"
+  run_as_user mkdir -p "$(dirname "$dest")"
+  run_as_user cp -a "$src" "$dest"
+  record_change "Installed file $dest from $src."
 }
 
 write_system_file() {
@@ -376,24 +431,216 @@ install_noctalia_packages() {
   record_change "Installed Noctalia v5 and Noctalia Greeter."
 }
 
+clone_or_update_config_repo() {
+  if [[ "$CONFIG_SOURCE_DIR_WAS_SET" == "1" ]]; then
+    log "CONFIG_SOURCE_DIR was set explicitly; skipping config repository clone."
+    return 0
+  fi
+
+  run_as_user mkdir -p "$(dirname "$CONFIG_REPO_DIR")"
+
+  if [[ -d "$CONFIG_REPO_DIR/.git" ]]; then
+    local current_url
+    current_url="$(run_as_user git -C "$CONFIG_REPO_DIR" config --get remote.origin.url || true)"
+    if [[ "$current_url" != "$CONFIG_REPO_URL" ]]; then
+      warn "$CONFIG_REPO_DIR is a git repository with origin $current_url, not $CONFIG_REPO_URL. Backing it up and cloning fresh."
+      backup_user_path "$CONFIG_REPO_DIR"
+      safe_rm_rf "$CONFIG_REPO_DIR"
+      run_as_user git clone "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
+    else
+      log "Updating config repository at $CONFIG_REPO_DIR."
+      run_as_user git -C "$CONFIG_REPO_DIR" fetch --prune
+      run_as_user git -C "$CONFIG_REPO_DIR" pull --ff-only
+    fi
+  elif [[ -e "$CONFIG_REPO_DIR" ]]; then
+    warn "$CONFIG_REPO_DIR exists but is not a git repository. Backing it up and cloning fresh."
+    backup_user_path "$CONFIG_REPO_DIR"
+    safe_rm_rf "$CONFIG_REPO_DIR"
+    run_as_user git clone "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
+  else
+    log "Cloning config repository to $CONFIG_REPO_DIR."
+    run_as_user git clone "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
+  fi
+
+  CONFIG_SOURCE_DIR="$CONFIG_REPO_DIR"
+  record_change "Cloned or updated config repository $CONFIG_REPO_URL."
+}
+
+first_existing_path() {
+  local candidate
+  for candidate in "$@"; do
+    if [[ -e "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 install_user_configs() {
-  if [[ -d "$CONFIG_SOURCE_DIR/alacritty" ]]; then
-    replace_user_path_with_dir "$CONFIG_SOURCE_DIR/alacritty" "$TARGET_HOME/.config/alacritty"
+  local src
+
+  if src="$(first_existing_path \
+    "$CONFIG_SOURCE_DIR/.config/alacritty" \
+    "$CONFIG_SOURCE_DIR/config/alacritty" \
+    "$CONFIG_SOURCE_DIR/alacritty")"; then
+    replace_user_path_with_dir "$src" "$TARGET_HOME/.config/alacritty"
   else
-    warn "No Alacritty config found at $CONFIG_SOURCE_DIR/alacritty."
+    warn "No Alacritty config found in $CONFIG_SOURCE_DIR."
   fi
 
-  if [[ -d "$CONFIG_SOURCE_DIR/niri" ]]; then
-    replace_user_path_with_dir "$CONFIG_SOURCE_DIR/niri" "$TARGET_HOME/.config/niri"
+  if src="$(first_existing_path \
+    "$CONFIG_SOURCE_DIR/.config/niri" \
+    "$CONFIG_SOURCE_DIR/config/niri" \
+    "$CONFIG_SOURCE_DIR/niri")"; then
+    replace_user_path_with_dir "$src" "$TARGET_HOME/.config/niri"
   else
-    warn "No Niri config found at $CONFIG_SOURCE_DIR/niri."
+    warn "No Niri config found in $CONFIG_SOURCE_DIR."
   fi
 
-  if [[ -d "$CONFIG_SOURCE_DIR/noctalia" ]]; then
-    replace_user_path_with_dir "$CONFIG_SOURCE_DIR/noctalia" "$TARGET_HOME/.config/noctalia"
+  if src="$(first_existing_path \
+    "$CONFIG_SOURCE_DIR/noctalia" \
+    "$CONFIG_SOURCE_DIR/noctalia-config" \
+    "$CONFIG_SOURCE_DIR/.config/noctalia" \
+    "$CONFIG_SOURCE_DIR/config/noctalia" \
+    "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" \
+    "$CONFIG_SOURCE_DIR/.config/noctalia/$NOCTALIA_CONFIG_FILE" \
+    "$CONFIG_SOURCE_DIR/config/noctalia/$NOCTALIA_CONFIG_FILE")"; then
+    if [[ -d "$src" ]]; then
+      replace_user_path_with_dir "$src" "$TARGET_HOME/.config/noctalia"
+    else
+      replace_user_file "$src" "$TARGET_HOME/.config/noctalia/$NOCTALIA_CONFIG_FILE"
+    fi
   else
-    warn "No Noctalia config found at $CONFIG_SOURCE_DIR/noctalia."
+    warn "No Noctalia config found in $CONFIG_SOURCE_DIR."
   fi
+}
+
+localized_pictures_dir() {
+  if [[ -n "$WALLPAPER_PARENT_DIR" ]]; then
+    printf '%s\n' "$WALLPAPER_PARENT_DIR"
+    return 0
+  fi
+
+  local xdg_pictures=""
+  if have_command xdg-user-dir; then
+    xdg_pictures="$(run_as_user xdg-user-dir PICTURES 2>/dev/null || true)"
+  fi
+
+  if [[ -n "$xdg_pictures" && "$xdg_pictures" != "$TARGET_HOME" ]]; then
+    printf '%s\n' "$xdg_pictures"
+    return 0
+  fi
+
+  local user_locale="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
+  case "$user_locale" in
+    sv_SE*|sv_*)
+      printf '%s\n' "$TARGET_HOME/Bilder"
+      ;;
+    *)
+      printf '%s\n' "$TARGET_HOME/Pictures"
+      ;;
+  esac
+}
+
+install_wallpapers() {
+  local src
+  if src="$(first_existing_path \
+    "$CONFIG_SOURCE_DIR/wallpapers" \
+    "$CONFIG_SOURCE_DIR/Pictures/wallpapers" \
+    "$CONFIG_SOURCE_DIR/pictures/wallpapers")"; then
+    local pictures_dir
+    pictures_dir="$(localized_pictures_dir)"
+    run_as_user mkdir -p "$pictures_dir"
+    replace_user_path_with_dir "$src" "$pictures_dir/$WALLPAPER_SUBDIR"
+  else
+    warn "No wallpapers directory found in $CONFIG_SOURCE_DIR."
+  fi
+}
+
+detect_connected_outputs() {
+  local status_file
+  local output
+
+  for status_file in /sys/class/drm/card*-*/status; do
+    [[ -r "$status_file" ]] || continue
+    [[ "$(cat "$status_file")" == "connected" ]] || continue
+    output="$(basename "$(dirname "$status_file")")"
+    output="${output#card*-}"
+    [[ -n "$output" ]] || continue
+    printf '%s\n' "$output"
+  done
+}
+
+configure_noctalia_settings() {
+  local wallpaper_dir
+  local wallpaper_path
+  local config_file="$TARGET_HOME/.config/noctalia/$NOCTALIA_CONFIG_FILE"
+  local marker_begin="# BEGIN fedora-niri-setup generated wallpaper settings"
+  local marker_end="# END fedora-niri-setup generated wallpaper settings"
+  local tmp
+  local output
+  local found_output=0
+
+  wallpaper_dir="$(localized_pictures_dir)/$WALLPAPER_SUBDIR"
+  wallpaper_path="$wallpaper_dir/$NOCTALIA_WALLPAPER_FILE"
+
+  run_as_user mkdir -p "$(dirname "$config_file")"
+  [[ -f "$config_file" ]] || run_as_user touch "$config_file"
+  backup_user_path "$config_file"
+
+  tmp="$(mktemp)"
+  awk -v marker_begin="$marker_begin" -v marker_end="$marker_end" '
+    $0 == marker_begin {
+      skipping = 1
+      next
+    }
+    $0 == marker_end {
+      skipping = 0
+      next
+    }
+    !skipping { print }
+  ' "$config_file" >"$tmp"
+
+  [[ ! -s "$tmp" ]] || printf '\n' >>"$tmp"
+
+  cat >>"$tmp" <<EOF
+$marker_begin
+[wallpaper]
+directory = "$wallpaper_dir"
+
+    [wallpaper.default]
+    path = "$wallpaper_path"
+
+    [wallpaper.last]
+    path = "$wallpaper_path"
+EOF
+
+  while IFS= read -r output; do
+    [[ -n "$output" ]] || continue
+    found_output=1
+    cat >>"$tmp" <<EOF
+
+    [wallpaper.monitors."$output"]
+    path = "$wallpaper_path"
+EOF
+  done < <(detect_connected_outputs)
+
+  printf '%s\n' "$marker_end" >>"$tmp"
+
+  if [[ "$found_output" == "0" ]]; then
+    warn "No connected monitor names were found under /sys/class/drm; Noctalia wallpaper config will use default and last only."
+  fi
+
+  chmod 0644 "$tmp"
+  run_as_user install -m 0644 "$tmp" "$config_file"
+  rm -f "$tmp"
+
+  if have_command noctalia; then
+    run_as_user noctalia config validate "$config_file" || warn "Noctalia config validation failed for $config_file."
+  fi
+
+  record_change "Configured Noctalia wallpaper settings in $config_file."
 }
 
 ensure_niri_autostarts_noctalia() {
@@ -649,9 +896,12 @@ main() {
   prepare_runtime
   install_fedora_packages
   install_noctalia_packages
+  clone_or_update_config_repo
   install_user_configs
   ensure_niri_autostarts_noctalia
   configure_user_environment
+  install_wallpapers
+  configure_noctalia_settings
   configure_gtk_dark_mode
   configure_noctalia_greeter
   print_summary

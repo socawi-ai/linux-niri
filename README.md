@@ -72,6 +72,10 @@ It enables the configured COPR for Noctalia packages, installs Noctalia v5 and t
 Noctalia Greeter, configures Niri to autostart Noctalia, and configures greetd to launch
 the Noctalia Greeter with Niri as the default session.
 
+It also clones or updates this repo, installs the Alacritty, Niri, and Noctalia configs,
+and copies the `wallpapers` folder into the target user's localized pictures directory.
+Noctalia v5 settings are installed under `~/.config/noctalia/settings.toml`.
+
 Run:
 
 ```bash

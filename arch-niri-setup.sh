@@ -44,6 +44,7 @@ CURSOR_SIZE="${CURSOR_SIZE:-24}"
 WALLPAPER_PARENT_DIR="${WALLPAPER_PARENT_DIR:-}"
 WALLPAPER_SUBDIR="${WALLPAPER_SUBDIR:-wallpapers}"
 NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-10.jpg}"
+NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 GTK_COLOR_SCHEME="${GTK_COLOR_SCHEME:-prefer-dark}"
 GTK_THEME_NAME="${GTK_THEME_NAME:-Adwaita-dark}"
 GTK_APPLICATION_PREFER_DARK="${GTK_APPLICATION_PREFER_DARK:-1}"
@@ -818,7 +819,7 @@ install_user_configs() {
     if [[ -d "$src" ]]; then
       replace_user_path_with_dir "$src" "$TARGET_HOME/.config/noctalia"
     else
-      replace_user_file "$src" "$TARGET_HOME/.config/noctalia/config.toml"
+      replace_user_file "$src" "$TARGET_HOME/.config/noctalia/$NOCTALIA_CONFIG_FILE"
     fi
   else
     warn "No Noctalia config found in $CONFIG_REPO_DIR."
@@ -920,7 +921,7 @@ detect_connected_outputs() {
 configure_noctalia_settings() {
   local wallpaper_dir
   local wallpaper_path
-  local config_file="$TARGET_HOME/.config/noctalia/config.toml"
+  local config_file="$TARGET_HOME/.config/noctalia/$NOCTALIA_CONFIG_FILE"
   local marker_begin="# BEGIN arch-niri-setup generated wallpaper settings"
   local marker_end="# END arch-niri-setup generated wallpaper settings"
   local tmp
