@@ -466,6 +466,43 @@ clone_or_update_config_repo() {
   record_change "Cloned or updated config repository $CONFIG_REPO_URL."
 }
 
+verify_config_source() {
+  [[ -d "$CONFIG_SOURCE_DIR" ]] || die "Config source directory does not exist: $CONFIG_SOURCE_DIR"
+
+  local missing=()
+  first_existing_path \
+    "$CONFIG_SOURCE_DIR/.config/alacritty" \
+    "$CONFIG_SOURCE_DIR/config/alacritty" \
+    "$CONFIG_SOURCE_DIR/alacritty" \
+    "$CONFIG_SOURCE_DIR/alacritty.toml" \
+    "$CONFIG_SOURCE_DIR/.alacritty.toml" >/dev/null || missing+=("alacritty")
+
+  first_existing_path \
+    "$CONFIG_SOURCE_DIR/.config/niri" \
+    "$CONFIG_SOURCE_DIR/config/niri" \
+    "$CONFIG_SOURCE_DIR/niri" >/dev/null || missing+=("niri")
+
+  first_existing_path \
+    "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" \
+    "$CONFIG_SOURCE_DIR/.config/noctalia/$NOCTALIA_CONFIG_FILE" \
+    "$CONFIG_SOURCE_DIR/config/noctalia/$NOCTALIA_CONFIG_FILE" \
+    "$CONFIG_SOURCE_DIR/noctalia" \
+    "$CONFIG_SOURCE_DIR/noctalia-config" \
+    "$CONFIG_SOURCE_DIR/.config/noctalia" \
+    "$CONFIG_SOURCE_DIR/config/noctalia" >/dev/null || missing+=("noctalia/$NOCTALIA_CONFIG_FILE")
+
+  first_existing_path \
+    "$CONFIG_SOURCE_DIR/wallpapers" \
+    "$CONFIG_SOURCE_DIR/Pictures/wallpapers" \
+    "$CONFIG_SOURCE_DIR/pictures/wallpapers" >/dev/null || missing+=("wallpapers")
+
+  if ((${#missing[@]})); then
+    die "Config source $CONFIG_SOURCE_DIR is missing required content: ${missing[*]}"
+  fi
+
+  log "Verified config source contains Alacritty, Niri, Noctalia, and wallpapers."
+}
+
 first_existing_path() {
   local candidate
   for candidate in "$@"; do
@@ -485,8 +522,12 @@ install_user_configs() {
     "$CONFIG_SOURCE_DIR/config/alacritty" \
     "$CONFIG_SOURCE_DIR/alacritty")"; then
     replace_user_path_with_dir "$src" "$TARGET_HOME/.config/alacritty"
+  elif src="$(first_existing_path \
+    "$CONFIG_SOURCE_DIR/alacritty.toml" \
+    "$CONFIG_SOURCE_DIR/.alacritty.toml")"; then
+    replace_user_file "$src" "$TARGET_HOME/.config/alacritty/alacritty.toml"
   else
-    warn "No Alacritty config found in $CONFIG_SOURCE_DIR."
+    die "No Alacritty config found in $CONFIG_SOURCE_DIR."
   fi
 
   if src="$(first_existing_path \
@@ -495,24 +536,24 @@ install_user_configs() {
     "$CONFIG_SOURCE_DIR/niri")"; then
     replace_user_path_with_dir "$src" "$TARGET_HOME/.config/niri"
   else
-    warn "No Niri config found in $CONFIG_SOURCE_DIR."
+    die "No Niri config found in $CONFIG_SOURCE_DIR."
   fi
 
   if src="$(first_existing_path \
+    "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" \
+    "$CONFIG_SOURCE_DIR/.config/noctalia/$NOCTALIA_CONFIG_FILE" \
+    "$CONFIG_SOURCE_DIR/config/noctalia/$NOCTALIA_CONFIG_FILE" \
     "$CONFIG_SOURCE_DIR/noctalia" \
     "$CONFIG_SOURCE_DIR/noctalia-config" \
     "$CONFIG_SOURCE_DIR/.config/noctalia" \
-    "$CONFIG_SOURCE_DIR/config/noctalia" \
-    "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" \
-    "$CONFIG_SOURCE_DIR/.config/noctalia/$NOCTALIA_CONFIG_FILE" \
-    "$CONFIG_SOURCE_DIR/config/noctalia/$NOCTALIA_CONFIG_FILE")"; then
+    "$CONFIG_SOURCE_DIR/config/noctalia")"; then
     if [[ -d "$src" ]]; then
       replace_user_path_with_dir "$src" "$TARGET_HOME/.config/noctalia"
     else
       replace_user_file "$src" "$TARGET_HOME/.config/noctalia/$NOCTALIA_CONFIG_FILE"
     fi
   else
-    warn "No Noctalia config found in $CONFIG_SOURCE_DIR."
+    die "No Noctalia config found in $CONFIG_SOURCE_DIR."
   fi
 }
 
@@ -554,7 +595,7 @@ install_wallpapers() {
     run_as_user mkdir -p "$pictures_dir"
     replace_user_path_with_dir "$src" "$pictures_dir/$WALLPAPER_SUBDIR"
   else
-    warn "No wallpapers directory found in $CONFIG_SOURCE_DIR."
+    die "No wallpapers directory found in $CONFIG_SOURCE_DIR."
   fi
 }
 
@@ -897,6 +938,7 @@ main() {
   install_fedora_packages
   install_noctalia_packages
   clone_or_update_config_repo
+  verify_config_source
   install_user_configs
   ensure_niri_autostarts_noctalia
   configure_user_environment
