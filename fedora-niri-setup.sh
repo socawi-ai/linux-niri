@@ -22,6 +22,7 @@ NOCTALIA_COPR="${NOCTALIA_COPR:-lionheartp/Hyprland}"
 NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
 NOCTALIA_GREETER_PACKAGE="${NOCTALIA_GREETER_PACKAGE:-noctalia-greeter}"
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
+NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
 NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-10.jpg}"
 GREETD_USER="${GREETD_USER:-greeter}"
 NOCTALIA_GREETER_SESSION_BIN="${NOCTALIA_GREETER_SESSION_BIN:-}"
@@ -488,7 +489,7 @@ install_user_configs() {
   log "Installing repo configs and overwriting existing target config directories."
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/alacritty" "$TARGET_HOME/.config/alacritty"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/niri" "$TARGET_HOME/.config/niri"
-  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/noctalia" "$TARGET_HOME/.config/noctalia"
+  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/noctalia" "$TARGET_HOME/$NOCTALIA_CONFIG_RELATIVE_DIR"
 }
 
 localized_pictures_dir() {
@@ -543,7 +544,7 @@ detect_connected_outputs() {
 configure_noctalia_settings() {
   local wallpaper_dir
   local wallpaper_path
-  local config_file="$TARGET_HOME/.config/noctalia/$NOCTALIA_CONFIG_FILE"
+  local config_file="$TARGET_HOME/$NOCTALIA_CONFIG_RELATIVE_DIR/$NOCTALIA_CONFIG_FILE"
   local marker_begin="# BEGIN fedora-niri-setup generated wallpaper settings"
   local marker_end="# END fedora-niri-setup generated wallpaper settings"
   local tmp

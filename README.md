@@ -74,7 +74,7 @@ the Noctalia Greeter with Niri as the default session.
 
 It also clones or updates this repo, installs the Alacritty, Niri, and Noctalia configs,
 and copies the `wallpapers` folder into the target user's localized pictures directory.
-Noctalia v5 settings are installed under `~/.config/noctalia/settings.toml`.
+Noctalia v5 settings are installed under `~/.local/state/noctalia/settings.toml`.
 
 Run:
 
