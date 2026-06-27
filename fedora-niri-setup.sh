@@ -17,9 +17,6 @@ EXTRA_FEDORA_PACKAGES="${EXTRA_FEDORA_PACKAGES:-}"
 
 ENABLE_NOCTALIA_COPR="${ENABLE_NOCTALIA_COPR:-1}"
 ENABLE_GREETD="${ENABLE_GREETD:-1}"
-ENABLE_LIMINE="${ENABLE_LIMINE:-0}"
-REMOVE_GRUB_AFTER_LIMINE="${REMOVE_GRUB_AFTER_LIMINE:-1}"
-PURGE_GRUB_PACKAGES="${PURGE_GRUB_PACKAGES:-0}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 NOCTALIA_COPR="${NOCTALIA_COPR:-lionheartp/Hyprland}"
 NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
@@ -37,13 +34,6 @@ GTK_THEME_NAME="${GTK_THEME_NAME:-Adwaita-dark}"
 GTK_APPLICATION_PREFER_DARK="${GTK_APPLICATION_PREFER_DARK:-1}"
 WALLPAPER_PARENT_DIR="${WALLPAPER_PARENT_DIR:-}"
 WALLPAPER_SUBDIR="${WALLPAPER_SUBDIR:-wallpapers}"
-LIMINE_BOOT_LABEL="${LIMINE_BOOT_LABEL:-Fedora Limine}"
-LIMINE_TIMEOUT="${LIMINE_TIMEOUT:-5}"
-LIMINE_BOOT_ROOT="${LIMINE_BOOT_ROOT:-/boot}"
-LIMINE_CONFIG="${LIMINE_CONFIG:-$LIMINE_BOOT_ROOT/limine/limine.conf}"
-LIMINE_EFI_ROOT="${LIMINE_EFI_ROOT:-}"
-LIMINE_EFI_DIR="${LIMINE_EFI_DIR:-}"
-LIMINE_FALLBACK_EFI="${LIMINE_FALLBACK_EFI:-1}"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_FILE:-$HOME/fedora-niri-setup-$TIMESTAMP.log}"
@@ -868,236 +858,6 @@ EOF
   record_change "Configured greetd to launch Noctalia Greeter with Niri as the default session."
 }
 
-find_limine_efi_binary() {
-  local candidate
-  local candidates=(
-    /usr/share/limine/BOOTX64.EFI
-    /usr/share/limine/limine-x64.efi
-    /usr/share/limine/limine-x86_64.efi
-    /usr/lib/limine/BOOTX64.EFI
-    /usr/lib/limine/limine-x64.efi
-    /usr/lib64/limine/BOOTX64.EFI
-  )
-
-  for candidate in "${candidates[@]}"; do
-    if [[ -f "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  candidate="$(find /usr/share/limine /usr/lib/limine /usr/lib64/limine -type f \( -iname 'BOOTX64.EFI' -o -iname 'limine*.efi' \) 2>/dev/null | head -n 1 || true)"
-  [[ -n "$candidate" ]] || return 1
-  printf '%s\n' "$candidate"
-}
-
-limine_boot_path() {
-  local path="$1"
-  if [[ "$path" == "$LIMINE_BOOT_ROOT/"* ]]; then
-    path="${path#"$LIMINE_BOOT_ROOT"}"
-  fi
-  [[ "$path" == /* ]] || path="/$path"
-  printf 'boot():%s\n' "$path"
-}
-
-resolve_limine_efi_paths() {
-  [[ "$ENABLE_LIMINE" == "1" ]] || return 0
-
-  if [[ -z "$LIMINE_EFI_ROOT" ]]; then
-    if [[ -d "$LIMINE_BOOT_ROOT/EFI" ]]; then
-      LIMINE_EFI_ROOT="$LIMINE_BOOT_ROOT/EFI"
-    elif [[ -d "$LIMINE_BOOT_ROOT/efi/EFI" ]]; then
-      LIMINE_EFI_ROOT="$LIMINE_BOOT_ROOT/efi/EFI"
-    elif [[ -d /boot/efi/EFI ]]; then
-      LIMINE_EFI_ROOT="/boot/efi/EFI"
-    elif [[ -d /efi/EFI ]]; then
-      LIMINE_EFI_ROOT="/efi/EFI"
-    else
-      local boot_fstype
-      boot_fstype="$(findmnt -no FSTYPE --target "$LIMINE_BOOT_ROOT" 2>/dev/null | head -n 1)"
-      case "$boot_fstype" in
-        vfat|fat|msdos)
-          LIMINE_EFI_ROOT="$LIMINE_BOOT_ROOT/EFI"
-          ;;
-        *)
-          die "Could not find an EFI directory. If /boot is your EFI system partition, it must be FAT/vfat or set LIMINE_EFI_ROOT=/boot/EFI explicitly."
-          ;;
-      esac
-    fi
-  fi
-
-  if [[ -z "$LIMINE_EFI_DIR" ]]; then
-    LIMINE_EFI_DIR="$LIMINE_EFI_ROOT/Limine"
-  fi
-
-  log "Limine EFI root: $LIMINE_EFI_ROOT"
-  log "Limine EFI directory: $LIMINE_EFI_DIR"
-}
-
-install_limine_packages() {
-  [[ "$ENABLE_LIMINE" == "1" ]] || return 0
-
-  log "Installing Limine bootloader packages."
-  dnf_install limine efibootmgr
-  have_command efibootmgr || die "efibootmgr was installed but is not available in PATH."
-  find_limine_efi_binary >/dev/null || die "Could not find a Limine EFI binary after installing the limine package."
-  record_change "Installed or verified Limine and efibootmgr."
-}
-
-write_limine_config_from_bls() {
-  [[ "$ENABLE_LIMINE" == "1" ]] || return 0
-
-  local entries_dir="$LIMINE_BOOT_ROOT/loader/entries"
-  [[ -d "$entries_dir" ]] || die "Fedora BLS entries were not found at $entries_dir."
-
-  local entry_files=()
-  mapfile -t entry_files < <(find "$entries_dir" -maxdepth 1 -type f -name '*.conf' -print | sort -Vr)
-  ((${#entry_files[@]})) || die "No Fedora BLS entry files found in $entries_dir."
-
-  local tmp
-  tmp="$(mktemp)"
-  {
-    printf 'timeout: %s\n' "$LIMINE_TIMEOUT"
-    printf '\n'
-  } >"$tmp"
-
-  local entry
-  for entry in "${entry_files[@]}"; do
-    local title
-    local linux_path
-    local initrd_line
-    local options
-    local initrd_path
-
-    title="$(awk '/^[[:space:]]*title[[:space:]]+/ { sub(/^[[:space:]]*title[[:space:]]+/, ""); print; exit }' "$entry")"
-    linux_path="$(awk '/^[[:space:]]*linux[[:space:]]+/ { sub(/^[[:space:]]*linux[[:space:]]+/, ""); print; exit }' "$entry")"
-    initrd_line="$(awk '/^[[:space:]]*initrd[[:space:]]+/ { sub(/^[[:space:]]*initrd[[:space:]]+/, ""); print; exit }' "$entry")"
-    options="$(awk '/^[[:space:]]*options[[:space:]]+/ { sub(/^[[:space:]]*options[[:space:]]+/, ""); print; exit }' "$entry")"
-
-    [[ -n "$linux_path" ]] || {
-      warn "Skipping BLS entry without linux path: $entry"
-      continue
-    }
-
-    title="${title:-$(basename "$entry" .conf)}"
-    {
-      printf '/%s\n' "$title"
-      printf '    protocol: linux\n'
-      printf '    kernel_path: %s\n' "$(limine_boot_path "$linux_path")"
-      for initrd_path in $initrd_line; do
-        [[ -n "$initrd_path" ]] || continue
-        printf '    module_path: %s\n' "$(limine_boot_path "$initrd_path")"
-      done
-      printf '    cmdline: %s\n' "$options"
-      printf '\n'
-    } >>"$tmp"
-  done
-
-  if ! grep -Eq '^/' "$tmp"; then
-    rm -f "$tmp"
-    die "Could not generate any Limine entries from $entries_dir."
-  fi
-
-  write_system_file "$LIMINE_CONFIG" 0644 <"$tmp"
-  rm -f "$tmp"
-  record_change "Generated Limine config from Fedora BLS entries at $LIMINE_CONFIG."
-}
-
-install_limine_efi_files() {
-  [[ "$ENABLE_LIMINE" == "1" ]] || return 0
-
-  resolve_limine_efi_paths
-
-  local limine_efi
-  limine_efi="$(find_limine_efi_binary)"
-
-  run_sudo install -d -m 0755 "$LIMINE_EFI_DIR"
-  backup_system_path "$LIMINE_EFI_DIR/limine.efi"
-  run_sudo install -m 0644 "$limine_efi" "$LIMINE_EFI_DIR/limine.efi"
-
-  if [[ "$LIMINE_FALLBACK_EFI" == "1" ]]; then
-    run_sudo install -d -m 0755 "$LIMINE_EFI_ROOT/BOOT"
-    backup_system_path "$LIMINE_EFI_ROOT/BOOT/BOOTX64.EFI"
-    run_sudo install -m 0644 "$limine_efi" "$LIMINE_EFI_ROOT/BOOT/BOOTX64.EFI"
-    record_change "Installed Limine EFI binary to $LIMINE_EFI_DIR/limine.efi and fallback BOOTX64.EFI."
-  else
-    record_change "Installed Limine EFI binary to $LIMINE_EFI_DIR/limine.efi."
-  fi
-}
-
-create_limine_uefi_entry() {
-  [[ "$ENABLE_LIMINE" == "1" ]] || return 0
-  resolve_limine_efi_paths
-
-  [[ -d /sys/firmware/efi ]] || {
-    warn "This system does not appear to be booted in UEFI mode. Limine files were installed, but no UEFI boot entry was created."
-    return 0
-  }
-
-  local efi_mount
-  local boot_source
-  local boot_disk_name
-  local boot_partnum
-  local boot_disk
-
-  efi_mount="$(findmnt -no TARGET --target "$LIMINE_EFI_ROOT" | head -n 1)"
-  [[ -n "$efi_mount" ]] || {
-    warn "Could not determine the EFI mount point for $LIMINE_EFI_ROOT; skipping efibootmgr entry creation."
-    return 0
-  }
-
-  boot_source="$(findmnt -no SOURCE --target "$efi_mount" | head -n 1)"
-  [[ "$boot_source" == /dev/* ]] || {
-    warn "Could not determine a block device for EFI mount $efi_mount; skipping efibootmgr entry creation."
-    return 0
-  }
-
-  boot_disk_name="$(lsblk -no PKNAME "$boot_source" | head -n 1 | tr -d '[:space:]')"
-  boot_partnum="$(lsblk -no PARTNUM "$boot_source" | head -n 1 | tr -d '[:space:]')"
-  if [[ -z "$boot_disk_name" || -z "$boot_partnum" ]]; then
-    warn "Could not derive parent disk and partition number from $boot_source; skipping efibootmgr entry creation."
-    return 0
-  fi
-
-  boot_disk="/dev/$boot_disk_name"
-  run_sudo efibootmgr -c -d "$boot_disk" -p "$boot_partnum" -L "$LIMINE_BOOT_LABEL" -l "\\EFI\\Limine\\limine.efi"
-  record_change "Created UEFI boot entry '$LIMINE_BOOT_LABEL' for $boot_disk partition $boot_partnum."
-}
-
-disable_grub_efi_path() {
-  [[ "$ENABLE_LIMINE" == "1" && "$REMOVE_GRUB_AFTER_LIMINE" == "1" ]] || return 0
-  resolve_limine_efi_paths
-
-  local grub_efi_dir="$LIMINE_EFI_ROOT/fedora"
-  if [[ -e "$grub_efi_dir" ]]; then
-    local disabled_dir="$LIMINE_EFI_ROOT/fedora.grub-disabled-$TIMESTAMP"
-    backup_system_path "$grub_efi_dir"
-    run_sudo mv "$grub_efi_dir" "$disabled_dir"
-    record_change "Moved GRUB EFI directory out of the active path: $grub_efi_dir -> $disabled_dir."
-  else
-    log "No Fedora GRUB EFI directory found at $grub_efi_dir."
-  fi
-
-  if [[ "$PURGE_GRUB_PACKAGES" == "1" ]]; then
-    warn "PURGE_GRUB_PACKAGES=1 is set; removing GRUB EFI/shim packages after Limine install."
-    run_sudo "$DNF_BIN" remove -y 'grub2-efi*' 'shim*'
-    record_change "Removed GRUB EFI and shim packages."
-  fi
-}
-
-configure_limine_bootloader() {
-  [[ "$ENABLE_LIMINE" == "1" ]] || return 0
-
-  log "Configuring Limine as the Fedora bootloader using $LIMINE_BOOT_ROOT."
-  install_limine_packages
-  resolve_limine_efi_paths
-  write_limine_config_from_bls
-  install_limine_efi_files
-  create_limine_uefi_entry
-  disable_grub_efi_path
-  warn "Limine was installed and GRUB was removed from the active EFI path. Reboot only when you are ready to test the new bootloader."
-}
-
 print_summary() {
   local item
 
@@ -1137,7 +897,6 @@ main() {
   configure_noctalia_settings
   configure_gtk_dark_mode
   configure_noctalia_greeter
-  configure_limine_bootloader
   print_summary
 }
 
