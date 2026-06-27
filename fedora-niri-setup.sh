@@ -5,9 +5,11 @@ CONFIG_REPO_URL="${CONFIG_REPO_URL:-https://github.com/socawi-ai/linux-niri}"
 CONFIG_REPO_DIR_WAS_SET=0
 CONFIG_SOURCE_DIR_WAS_SET=0
 USER_BACKUP_ROOT_WAS_SET=0
+MCMOJAVE_CURSORS_DIR_WAS_SET=0
 [[ -n "${CONFIG_REPO_DIR+x}" ]] && CONFIG_REPO_DIR_WAS_SET=1
 [[ -n "${CONFIG_SOURCE_DIR+x}" ]] && CONFIG_SOURCE_DIR_WAS_SET=1
 [[ -n "${USER_BACKUP_ROOT+x}" ]] && USER_BACKUP_ROOT_WAS_SET=1
+[[ -n "${MCMOJAVE_CURSORS_DIR+x}" ]] && MCMOJAVE_CURSORS_DIR_WAS_SET=1
 CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
 CONFIG_REPO_DIR="${CONFIG_REPO_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri}"
 CONFIG_SOURCE_DIR="${CONFIG_SOURCE_DIR:-}"
@@ -17,10 +19,27 @@ EXTRA_FEDORA_PACKAGES="${EXTRA_FEDORA_PACKAGES:-}"
 
 ENABLE_NOCTALIA_COPR="${ENABLE_NOCTALIA_COPR:-1}"
 ENABLE_GREETD="${ENABLE_GREETD:-1}"
+ENABLE_FLATHUB="${ENABLE_FLATHUB:-1}"
+INSTALL_STEAM="${INSTALL_STEAM:-1}"
+INSTALL_BITWARDEN="${INSTALL_BITWARDEN:-1}"
+INSTALL_VSCODE="${INSTALL_VSCODE:-1}"
+INSTALL_MCMOJAVE_CURSORS="${INSTALL_MCMOJAVE_CURSORS:-1}"
+INSTALL_NAUTILUS_OPEN_ANY_TERMINAL="${INSTALL_NAUTILUS_OPEN_ANY_TERMINAL:-1}"
+INSTALL_LSFG_VK="${INSTALL_LSFG_VK:-1}"
+INSTALL_POLARIS="${INSTALL_POLARIS:-1}"
+SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 NOCTALIA_COPR="${NOCTALIA_COPR:-lionheartp/Hyprland}"
 NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
 NOCTALIA_GREETER_PACKAGE="${NOCTALIA_GREETER_PACKAGE:-noctalia-greeter}"
+NAUTILUS_OPEN_ANY_TERMINAL_COPR="${NAUTILUS_OPEN_ANY_TERMINAL_COPR:-monkeygold/nautilus-open-any-terminal}"
+NAUTILUS_TERMINAL="${NAUTILUS_TERMINAL:-alacritty}"
+MCMOJAVE_CURSORS_REPO="${MCMOJAVE_CURSORS_REPO:-https://github.com/vinceliuice/McMojave-cursors}"
+MCMOJAVE_CURSORS_DIR="${MCMOJAVE_CURSORS_DIR:-$HOME/.cache/fedora-niri-setup/McMojave-cursors}"
+MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
+LSFG_VK_RELEASE_API="${LSFG_VK_RELEASE_API:-https://api.github.com/repos/PancakeTAS/lsfg-vk/releases/latest}"
+LSFG_VK_ASSET_REGEX="${LSFG_VK_ASSET_REGEX:-lsfg-vk-.*(linux|x86_64).*\\.tar\\.xz$}"
+POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
 NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-13.png}"
@@ -32,6 +51,7 @@ XKB_LAYOUT="${XKB_LAYOUT:-se}"
 GTK_COLOR_SCHEME="${GTK_COLOR_SCHEME:-prefer-dark}"
 GTK_THEME_NAME="${GTK_THEME_NAME:-Adwaita-dark}"
 GTK_APPLICATION_PREFER_DARK="${GTK_APPLICATION_PREFER_DARK:-1}"
+GTK_CURSOR_THEME="${GTK_CURSOR_THEME:-$MCMOJAVE_CURSOR_THEME}"
 WALLPAPER_PARENT_DIR="${WALLPAPER_PARENT_DIR:-}"
 WALLPAPER_SUBDIR="${WALLPAPER_SUBDIR:-wallpapers}"
 
@@ -42,6 +62,23 @@ SYSTEM_BACKUP_ROOT="${SYSTEM_BACKUP_ROOT:-/var/backups/fedora-niri-setup/$TIMEST
 
 TARGET_HOME="$HOME"
 DNF_BIN=""
+STEP_COUNT=0
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  COLOR_RESET=$'\033[0m'
+  COLOR_BLUE=$'\033[1;34m'
+  COLOR_GREEN=$'\033[1;32m'
+  COLOR_YELLOW=$'\033[1;33m'
+  COLOR_RED=$'\033[1;31m'
+  COLOR_DIM=$'\033[2m'
+else
+  COLOR_RESET=""
+  COLOR_BLUE=""
+  COLOR_GREEN=""
+  COLOR_YELLOW=""
+  COLOR_RED=""
+  COLOR_DIM=""
+fi
 
 declare -a CHANGES=()
 declare -a WARNINGS=()
@@ -52,17 +89,23 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 trap 'die "Setup failed on or near line $LINENO. Review $LOG_FILE, fix the reported problem, then re-run the script."' ERR
 
+section() {
+  STEP_COUNT=$((STEP_COUNT + 1))
+  printf '\n%s+--[%02d] %s%s\n' "$COLOR_BLUE" "$STEP_COUNT" "$*" "$COLOR_RESET"
+  printf '%s|%s\n' "$COLOR_DIM" "$COLOR_RESET"
+}
+
 log() {
-  printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
+  printf '%s[%s]%s %s\n' "$COLOR_GREEN" "$(date '+%H:%M:%S')" "$COLOR_RESET" "$*"
 }
 
 warn() {
   WARNINGS+=("$*")
-  printf '[%s] WARNING: %s\n' "$(date '+%H:%M:%S')" "$*" >&2
+  printf '%s[%s] WARNING:%s %s\n' "$COLOR_YELLOW" "$(date '+%H:%M:%S')" "$COLOR_RESET" "$*" >&2
 }
 
 die() {
-  printf '[%s] ERROR: %s\n' "$(date '+%H:%M:%S')" "$*" >&2
+  printf '%s[%s] ERROR:%s %s\n' "$COLOR_RED" "$(date '+%H:%M:%S')" "$COLOR_RESET" "$*" >&2
   exit 1
 }
 
@@ -173,6 +216,10 @@ resolve_target_user() {
 
   if [[ "$CONFIG_SOURCE_DIR_WAS_SET" == "0" ]]; then
     CONFIG_SOURCE_DIR="$CONFIG_REPO_DIR"
+  fi
+
+  if [[ "$MCMOJAVE_CURSORS_DIR_WAS_SET" == "0" ]]; then
+    MCMOJAVE_CURSORS_DIR="$TARGET_HOME/.cache/fedora-niri-setup/McMojave-cursors"
   fi
 
   log "Target user: $TARGET_USER"
@@ -320,6 +367,34 @@ dnf_install() {
   run_sudo "$DNF_BIN" "${args[@]}" "${packages[@]}"
 }
 
+dnf_install_optional() {
+  if dnf_install "$@"; then
+    return 0
+  fi
+
+  warn "Could not install optional package set: $*"
+  return 1
+}
+
+enable_copr_repo() {
+  local copr="$1"
+  local label="${2:-$copr}"
+  local repo_owner="${copr%%/*}"
+  local repo_name="${copr#*/}"
+  local repo_glob="/etc/yum.repos.d/*${repo_owner}*${repo_name}*.repo"
+
+  dnf_install dnf-plugins-core
+
+  if compgen -G "$repo_glob" >/dev/null; then
+    log "COPR $copr appears to be enabled."
+    return 0
+  fi
+
+  log "Enabling COPR $copr for $label."
+  run_sudo "$DNF_BIN" copr enable -y "$copr"
+  record_change "Enabled COPR $copr."
+}
+
 install_fedora_packages() {
   local packages=(
     dnf-plugins-core
@@ -334,6 +409,9 @@ install_fedora_packages() {
     curl
     git
     gh
+    tar
+    xz
+    flatpak
     niri
     greetd
     greetd-selinux
@@ -370,18 +448,14 @@ install_fedora_packages() {
     gtk4
     qt5-qtwayland
     qt6-qtwayland
+    qt6-qtbase
+    qt6-qtdeclarative
     pipewire
     wireplumber
     pipewire-pulseaudio
     pipewire-alsa
     pipewire-jack-audio-connection-kit
   )
-
-  # Bitwarden is in the Arch official list, but it is not consistently available
-  # from Fedora's enabled official repositories. Keep it opt-in for now.
-  if [[ "${INSTALL_BITWARDEN:-0}" == "1" ]]; then
-    packages+=(bitwarden)
-  fi
 
   if [[ -n "$EXTRA_FEDORA_PACKAGES" ]]; then
     local extra_packages=()
@@ -394,26 +468,303 @@ install_fedora_packages() {
   record_change "Installed or verified Fedora packages for a basic Niri desktop."
 }
 
+enable_flathub() {
+  [[ "$ENABLE_FLATHUB" == "1" ]] || {
+    log "Flathub enablement is disabled."
+    return 0
+  }
+
+  have_command flatpak || {
+    warn "flatpak is not available; skipping Flathub setup."
+    return 1
+  }
+
+  if flatpak remotes --system | awk '{ print $1 }' | grep -Fxq flathub; then
+    log "Flathub system remote is already enabled."
+  else
+    log "Enabling Flathub system remote."
+    run_sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    record_change "Enabled Flathub system remote."
+  fi
+}
+
+install_flatpak_app() {
+  local app_id="$1"
+  local label="$2"
+
+  have_command flatpak || {
+    warn "flatpak is not available; skipping $label."
+    return 1
+  }
+
+  if flatpak info --system "$app_id" >/dev/null 2>&1; then
+    log "$label is already installed as a system Flatpak."
+    return 0
+  fi
+
+  log "Installing $label from Flathub."
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    run_sudo flatpak install --system -y flathub "$app_id"
+  else
+    run_sudo flatpak install --system flathub "$app_id"
+  fi
+  record_change "Installed $label from Flathub."
+}
+
+install_flatpak_apps() {
+  [[ "$INSTALL_STEAM" == "1" || "$INSTALL_BITWARDEN" == "1" ]] || return 0
+
+  enable_flathub || return 0
+
+  if [[ "$INSTALL_STEAM" == "1" ]]; then
+    install_flatpak_app com.valvesoftware.Steam Steam || warn "Steam Flatpak installation failed."
+  fi
+
+  if [[ "$INSTALL_BITWARDEN" == "1" ]]; then
+    install_flatpak_app com.bitwarden.desktop Bitwarden || warn "Bitwarden Flatpak installation failed."
+  fi
+}
+
+install_vscode() {
+  [[ "$INSTALL_VSCODE" == "1" ]] || {
+    log "VS Code installation is disabled."
+    return 0
+  }
+
+  log "Configuring Microsoft VS Code repository."
+  if ! run_sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc; then
+    warn "Could not import Microsoft package signing key; skipping VS Code."
+    return 0
+  fi
+
+  write_system_file /etc/yum.repos.d/vscode.repo 0644 <<'EOF'
+[code]
+name=Visual Studio Code
+baseurl=https://packages.microsoft.com/yumrepos/vscode
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc
+EOF
+
+  if dnf_install_optional code; then
+    record_change "Installed Visual Studio Code."
+  fi
+}
+
+clone_or_update_git_repo() {
+  local repo_url="$1"
+  local repo_dir="$2"
+  local branch="${3:-}"
+
+  run_as_user mkdir -p "$(dirname "$repo_dir")"
+
+  if [[ -d "$repo_dir/.git" ]]; then
+    local current_url
+    current_url="$(run_as_user git -C "$repo_dir" config --get remote.origin.url || true)"
+    if [[ "$current_url" != "$repo_url" ]]; then
+      warn "$repo_dir has origin $current_url, not $repo_url. Backing it up and cloning fresh."
+      backup_user_path "$repo_dir"
+      safe_rm_rf "$repo_dir"
+      if [[ -n "$branch" ]]; then
+        run_as_user git clone --branch "$branch" "$repo_url" "$repo_dir"
+      else
+        run_as_user git clone "$repo_url" "$repo_dir"
+      fi
+    else
+      log "Updating repository at $repo_dir."
+      run_as_user git -C "$repo_dir" fetch --prune
+      if [[ -n "$branch" ]]; then
+        run_as_user git -C "$repo_dir" checkout -f "$branch"
+        run_as_user git -C "$repo_dir" reset --hard "origin/$branch"
+      else
+        run_as_user git -C "$repo_dir" pull --ff-only
+      fi
+    fi
+  elif [[ -e "$repo_dir" ]]; then
+    warn "$repo_dir exists but is not a git repository. Backing it up and cloning fresh."
+    backup_user_path "$repo_dir"
+    safe_rm_rf "$repo_dir"
+    if [[ -n "$branch" ]]; then
+      run_as_user git clone --branch "$branch" "$repo_url" "$repo_dir"
+    else
+      run_as_user git clone "$repo_url" "$repo_dir"
+    fi
+  else
+    log "Cloning $repo_url to $repo_dir."
+    if [[ -n "$branch" ]]; then
+      run_as_user git clone --branch "$branch" "$repo_url" "$repo_dir"
+    else
+      run_as_user git clone "$repo_url" "$repo_dir"
+    fi
+  fi
+}
+
+install_mcmojave_cursors() {
+  [[ "$INSTALL_MCMOJAVE_CURSORS" == "1" ]] || {
+    log "McMojave cursor installation is disabled."
+    return 0
+  }
+
+  clone_or_update_git_repo "$MCMOJAVE_CURSORS_REPO" "$MCMOJAVE_CURSORS_DIR"
+
+  local theme_dirs=()
+  shopt -s nullglob
+  theme_dirs=("$MCMOJAVE_CURSORS_DIR"/dist/*)
+  shopt -u nullglob
+
+  ((${#theme_dirs[@]})) || {
+    warn "No cursor themes found in $MCMOJAVE_CURSORS_DIR/dist; skipping McMojave cursor install."
+    return 0
+  }
+
+  run_as_user mkdir -p "$TARGET_HOME/.local/share/icons"
+
+  local theme_dir
+  for theme_dir in "${theme_dirs[@]}"; do
+    [[ -d "$theme_dir" ]] || continue
+    replace_user_path_with_dir "$theme_dir" "$TARGET_HOME/.local/share/icons/$(basename "$theme_dir")"
+  done
+
+  record_change "Installed McMojave cursor themes to $TARGET_HOME/.local/share/icons."
+}
+
+install_nautilus_open_any_terminal() {
+  [[ "$INSTALL_NAUTILUS_OPEN_ANY_TERMINAL" == "1" ]] || {
+    log "Nautilus Open Any Terminal installation is disabled."
+    return 0
+  }
+
+  if ! enable_copr_repo "$NAUTILUS_OPEN_ANY_TERMINAL_COPR" "Nautilus Open Any Terminal"; then
+    warn "Could not enable Nautilus Open Any Terminal COPR."
+    return 0
+  fi
+
+  if dnf_install_optional nautilus-open-any-terminal; then
+    record_change "Installed Nautilus Open Any Terminal."
+  else
+    return 0
+  fi
+}
+
+configure_nautilus_open_any_terminal() {
+  [[ "$INSTALL_NAUTILUS_OPEN_ANY_TERMINAL" == "1" ]] || return 0
+
+  if run_as_user gsettings writable com.github.stunkymonkey.nautilus-open-any-terminal terminal >/dev/null 2>&1; then
+    run_as_user gsettings set com.github.stunkymonkey.nautilus-open-any-terminal terminal "$NAUTILUS_TERMINAL" || warn "Could not configure Nautilus Open Any Terminal."
+    record_change "Configured Nautilus Open Any Terminal to use $NAUTILUS_TERMINAL."
+  else
+    warn "Nautilus Open Any Terminal gsettings schema is not available; cannot set terminal to $NAUTILUS_TERMINAL."
+  fi
+
+  if have_command nautilus; then
+    run_as_user nautilus -q >/dev/null 2>&1 || true
+  fi
+}
+
+github_latest_asset_url() {
+  local api_url="$1"
+  local asset_regex="$2"
+
+  curl -fsSL "$api_url" |
+    awk -F'"' -v regex="$asset_regex" '$2 == "browser_download_url" && $4 ~ regex { print $4; exit }'
+}
+
+download_as_user() {
+  local url="$1"
+  local dest="$2"
+
+  run_as_user mkdir -p "$(dirname "$dest")"
+  run_as_user curl -fL "$url" -o "$dest"
+}
+
+install_lsfg_vk() {
+  [[ "$INSTALL_LSFG_VK" == "1" ]] || {
+    log "LSFG-VK installation is disabled."
+    return 0
+  }
+
+  local asset_url
+  if ! asset_url="$(github_latest_asset_url "$LSFG_VK_RELEASE_API" "$LSFG_VK_ASSET_REGEX")" || [[ -z "$asset_url" ]]; then
+    warn "Could not find a matching LSFG-VK release asset."
+    return 0
+  fi
+
+  local downloads_dir="$TARGET_HOME/.cache/fedora-niri-setup/downloads"
+  local archive="$downloads_dir/$(basename "$asset_url")"
+
+  log "Downloading LSFG-VK from $asset_url."
+  if ! download_as_user "$asset_url" "$archive"; then
+    warn "Could not download LSFG-VK."
+    return 0
+  fi
+
+  run_as_user mkdir -p "$TARGET_HOME/.local"
+  if ! run_as_user tar -xJf "$archive" -C "$TARGET_HOME/.local"; then
+    warn "Could not extract LSFG-VK archive."
+    return 0
+  fi
+
+  record_change "Installed LSFG-VK into $TARGET_HOME/.local."
+}
+
+install_polaris() {
+  [[ "$INSTALL_POLARIS" == "1" ]] || {
+    log "Polaris installation is disabled."
+    return 0
+  }
+
+  local fedora_version
+  local rpm_url
+  local rpm_path
+  fedora_version="$(rpm -E %fedora)"
+  rpm_url="$POLARIS_BASE_URL/Polaris-fedora${fedora_version}-x86_64.rpm"
+  rpm_path="$TARGET_HOME/.cache/fedora-niri-setup/downloads/$(basename "$rpm_url")"
+
+  log "Downloading Polaris package for Fedora $fedora_version."
+  if ! download_as_user "$rpm_url" "$rpm_path"; then
+    warn "Could not download Polaris package from $rpm_url."
+    return 0
+  fi
+
+  if ! dnf_install_optional "$rpm_path"; then
+    warn "Could not install Polaris package."
+    return 0
+  fi
+
+  if [[ "$SETUP_POLARIS_HOST" == "1" ]]; then
+    if have_command polaris; then
+      log "Running Polaris host setup."
+      if run_sudo polaris --setup-host; then
+        record_change "Installed Polaris and ran host setup."
+      else
+        warn "Polaris installed, but host setup failed."
+        record_change "Installed Polaris."
+      fi
+    else
+      warn "Polaris package installed, but polaris was not found in PATH."
+      record_change "Installed Polaris package."
+    fi
+  else
+    record_change "Installed Polaris package."
+  fi
+}
+
+install_default_apps() {
+  install_vscode
+  install_flatpak_apps
+  install_mcmojave_cursors
+  install_nautilus_open_any_terminal
+  install_lsfg_vk
+  install_polaris
+}
+
 enable_noctalia_copr() {
   [[ "$ENABLE_NOCTALIA_COPR" == "1" ]] || {
     log "Noctalia COPR enablement is disabled."
     return 0
   }
 
-  log "Ensuring COPR support is available."
-  dnf_install dnf-plugins-core
-
-  local repo_owner="${NOCTALIA_COPR%%/*}"
-  local repo_name="${NOCTALIA_COPR#*/}"
-  local repo_glob="/etc/yum.repos.d/*${repo_owner}*${repo_name}*.repo"
-  if compgen -G "$repo_glob" >/dev/null; then
-    log "COPR $NOCTALIA_COPR appears to be enabled."
-  else
-    log "Enabling COPR $NOCTALIA_COPR for Noctalia packages."
-    run_sudo "$DNF_BIN" copr enable -y "$NOCTALIA_COPR"
-    record_change "Enabled COPR $NOCTALIA_COPR."
-  fi
-
+  enable_copr_repo "$NOCTALIA_COPR" "Noctalia packages"
   run_sudo "$DNF_BIN" makecache -y
 }
 
@@ -707,10 +1058,12 @@ upsert_gtk_settings_file() {
   if [[ -f "$path" ]]; then
     awk \
       -v gtk_theme="$GTK_THEME_NAME" \
-      -v prefer_dark="$GTK_APPLICATION_PREFER_DARK" '
+      -v prefer_dark="$GTK_APPLICATION_PREFER_DARK" \
+      -v cursor_theme="$GTK_CURSOR_THEME" '
       function emit_missing() {
         if (!seen_theme) print "gtk-theme-name=" gtk_theme
         if (!seen_dark) print "gtk-application-prefer-dark-theme=" prefer_dark
+        if (!seen_cursor) print "gtk-cursor-theme-name=" cursor_theme
       }
       BEGIN { in_settings = 0; saw_settings = 0 }
       /^\[Settings\]$/ {
@@ -737,6 +1090,11 @@ upsert_gtk_settings_file() {
         seen_dark = 1
         next
       }
+      in_settings && /^gtk-cursor-theme-name=/ {
+        print "gtk-cursor-theme-name=" cursor_theme
+        seen_cursor = 1
+        next
+      }
       { print }
       END {
         if (in_settings) {
@@ -746,6 +1104,7 @@ upsert_gtk_settings_file() {
           print "[Settings]"
           print "gtk-theme-name=" gtk_theme
           print "gtk-application-prefer-dark-theme=" prefer_dark
+          print "gtk-cursor-theme-name=" cursor_theme
         }
       }
     ' "$path" >"$tmp"
@@ -754,6 +1113,7 @@ upsert_gtk_settings_file() {
 [Settings]
 gtk-theme-name=$GTK_THEME_NAME
 gtk-application-prefer-dark-theme=$GTK_APPLICATION_PREFER_DARK
+gtk-cursor-theme-name=$GTK_CURSOR_THEME
 EOF
   fi
 
@@ -774,7 +1134,11 @@ configure_gtk_dark_mode() {
     run_as_user gsettings set org.gnome.desktop.interface gtk-theme "$GTK_THEME_NAME" || warn "Could not set GNOME gtk-theme."
   fi
 
-  record_change "Configured basic GTK dark-mode preferences."
+  if run_as_user gsettings writable org.gnome.desktop.interface cursor-theme >/dev/null 2>&1; then
+    run_as_user gsettings set org.gnome.desktop.interface cursor-theme "$GTK_CURSOR_THEME" || warn "Could not set GNOME cursor-theme."
+  fi
+
+  record_change "Configured basic GTK dark-mode and cursor preferences."
 }
 
 ensure_greeter_user() {
@@ -883,20 +1247,37 @@ print_summary() {
 }
 
 main() {
+  section "Fedora Niri setup"
   require_fedora
   resolve_target_user
   prepare_runtime
+
+  section "Base packages"
   install_fedora_packages
+
+  section "Default apps"
+  install_default_apps
+
+  section "Noctalia"
   install_noctalia_packages
+
+  section "Repo configs"
   clone_or_update_config_repo
   verify_config_source
   install_user_configs
   ensure_niri_autostarts_noctalia
+
+  section "User settings"
   configure_user_environment
   install_wallpapers
   configure_noctalia_settings
   configure_gtk_dark_mode
+  configure_nautilus_open_any_terminal
+
+  section "Greeter"
   configure_noctalia_greeter
+
+  section "Summary"
   print_summary
 }
 
