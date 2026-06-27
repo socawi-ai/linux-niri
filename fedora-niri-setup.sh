@@ -8,6 +8,7 @@ USER_BACKUP_ROOT_WAS_SET=0
 [[ -n "${CONFIG_REPO_DIR+x}" ]] && CONFIG_REPO_DIR_WAS_SET=1
 [[ -n "${CONFIG_SOURCE_DIR+x}" ]] && CONFIG_SOURCE_DIR_WAS_SET=1
 [[ -n "${USER_BACKUP_ROOT+x}" ]] && USER_BACKUP_ROOT_WAS_SET=1
+CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
 CONFIG_REPO_DIR="${CONFIG_REPO_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri}"
 CONFIG_SOURCE_DIR="${CONFIG_SOURCE_DIR:-}"
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-$USER}}"
@@ -446,115 +447,48 @@ clone_or_update_config_repo() {
       warn "$CONFIG_REPO_DIR is a git repository with origin $current_url, not $CONFIG_REPO_URL. Backing it up and cloning fresh."
       backup_user_path "$CONFIG_REPO_DIR"
       safe_rm_rf "$CONFIG_REPO_DIR"
-      run_as_user git clone "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
+      run_as_user git clone --branch "$CONFIG_REPO_BRANCH" "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
     else
       log "Updating config repository at $CONFIG_REPO_DIR."
       run_as_user git -C "$CONFIG_REPO_DIR" fetch --prune
-      run_as_user git -C "$CONFIG_REPO_DIR" pull --ff-only
+      run_as_user git -C "$CONFIG_REPO_DIR" checkout -f "$CONFIG_REPO_BRANCH"
+      run_as_user git -C "$CONFIG_REPO_DIR" reset --hard "origin/$CONFIG_REPO_BRANCH"
     fi
   elif [[ -e "$CONFIG_REPO_DIR" ]]; then
     warn "$CONFIG_REPO_DIR exists but is not a git repository. Backing it up and cloning fresh."
     backup_user_path "$CONFIG_REPO_DIR"
     safe_rm_rf "$CONFIG_REPO_DIR"
-    run_as_user git clone "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
+    run_as_user git clone --branch "$CONFIG_REPO_BRANCH" "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
   else
     log "Cloning config repository to $CONFIG_REPO_DIR."
-    run_as_user git clone "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
+    run_as_user git clone --branch "$CONFIG_REPO_BRANCH" "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
   fi
 
   CONFIG_SOURCE_DIR="$CONFIG_REPO_DIR"
-  record_change "Cloned or updated config repository $CONFIG_REPO_URL."
+  record_change "Cloned or updated config repository $CONFIG_REPO_URL branch $CONFIG_REPO_BRANCH."
 }
 
 verify_config_source() {
   [[ -d "$CONFIG_SOURCE_DIR" ]] || die "Config source directory does not exist: $CONFIG_SOURCE_DIR"
 
   local missing=()
-  first_existing_path \
-    "$CONFIG_SOURCE_DIR/.config/alacritty" \
-    "$CONFIG_SOURCE_DIR/config/alacritty" \
-    "$CONFIG_SOURCE_DIR/alacritty" \
-    "$CONFIG_SOURCE_DIR/alacritty.toml" \
-    "$CONFIG_SOURCE_DIR/.alacritty.toml" >/dev/null || missing+=("alacritty")
-
-  first_existing_path \
-    "$CONFIG_SOURCE_DIR/.config/niri" \
-    "$CONFIG_SOURCE_DIR/config/niri" \
-    "$CONFIG_SOURCE_DIR/niri" >/dev/null || missing+=("niri")
-
-  first_existing_path \
-    "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" \
-    "$CONFIG_SOURCE_DIR/.config/noctalia/$NOCTALIA_CONFIG_FILE" \
-    "$CONFIG_SOURCE_DIR/config/noctalia/$NOCTALIA_CONFIG_FILE" \
-    "$CONFIG_SOURCE_DIR/noctalia" \
-    "$CONFIG_SOURCE_DIR/noctalia-config" \
-    "$CONFIG_SOURCE_DIR/.config/noctalia" \
-    "$CONFIG_SOURCE_DIR/config/noctalia" >/dev/null || missing+=("noctalia/$NOCTALIA_CONFIG_FILE")
-
-  first_existing_path \
-    "$CONFIG_SOURCE_DIR/wallpapers" \
-    "$CONFIG_SOURCE_DIR/Pictures/wallpapers" \
-    "$CONFIG_SOURCE_DIR/pictures/wallpapers" >/dev/null || missing+=("wallpapers")
+  [[ -d "$CONFIG_SOURCE_DIR/alacritty" ]] || missing+=("alacritty/")
+  [[ -d "$CONFIG_SOURCE_DIR/niri" ]] || missing+=("niri/")
+  [[ -f "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" ]] || missing+=("noctalia/$NOCTALIA_CONFIG_FILE")
+  [[ -d "$CONFIG_SOURCE_DIR/wallpapers" ]] || missing+=("wallpapers/")
 
   if ((${#missing[@]})); then
     die "Config source $CONFIG_SOURCE_DIR is missing required content: ${missing[*]}"
   fi
 
-  log "Verified config source contains Alacritty, Niri, Noctalia, and wallpapers."
-}
-
-first_existing_path() {
-  local candidate
-  for candidate in "$@"; do
-    if [[ -e "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  return 1
+  log "Verified config source contains alacritty/, niri/, noctalia/$NOCTALIA_CONFIG_FILE, and wallpapers/."
 }
 
 install_user_configs() {
-  local src
-
-  if src="$(first_existing_path \
-    "$CONFIG_SOURCE_DIR/.config/alacritty" \
-    "$CONFIG_SOURCE_DIR/config/alacritty" \
-    "$CONFIG_SOURCE_DIR/alacritty")"; then
-    replace_user_path_with_dir "$src" "$TARGET_HOME/.config/alacritty"
-  elif src="$(first_existing_path \
-    "$CONFIG_SOURCE_DIR/alacritty.toml" \
-    "$CONFIG_SOURCE_DIR/.alacritty.toml")"; then
-    replace_user_file "$src" "$TARGET_HOME/.config/alacritty/alacritty.toml"
-  else
-    die "No Alacritty config found in $CONFIG_SOURCE_DIR."
-  fi
-
-  if src="$(first_existing_path \
-    "$CONFIG_SOURCE_DIR/.config/niri" \
-    "$CONFIG_SOURCE_DIR/config/niri" \
-    "$CONFIG_SOURCE_DIR/niri")"; then
-    replace_user_path_with_dir "$src" "$TARGET_HOME/.config/niri"
-  else
-    die "No Niri config found in $CONFIG_SOURCE_DIR."
-  fi
-
-  if src="$(first_existing_path \
-    "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" \
-    "$CONFIG_SOURCE_DIR/.config/noctalia/$NOCTALIA_CONFIG_FILE" \
-    "$CONFIG_SOURCE_DIR/config/noctalia/$NOCTALIA_CONFIG_FILE" \
-    "$CONFIG_SOURCE_DIR/noctalia" \
-    "$CONFIG_SOURCE_DIR/noctalia-config" \
-    "$CONFIG_SOURCE_DIR/.config/noctalia" \
-    "$CONFIG_SOURCE_DIR/config/noctalia")"; then
-    if [[ -d "$src" ]]; then
-      replace_user_path_with_dir "$src" "$TARGET_HOME/.config/noctalia"
-    else
-      replace_user_file "$src" "$TARGET_HOME/.config/noctalia/$NOCTALIA_CONFIG_FILE"
-    fi
-  else
-    die "No Noctalia config found in $CONFIG_SOURCE_DIR."
-  fi
+  log "Installing repo configs and overwriting existing target config directories."
+  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/alacritty" "$TARGET_HOME/.config/alacritty"
+  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/niri" "$TARGET_HOME/.config/niri"
+  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/noctalia" "$TARGET_HOME/.config/noctalia"
 }
 
 localized_pictures_dir() {
@@ -585,18 +519,11 @@ localized_pictures_dir() {
 }
 
 install_wallpapers() {
-  local src
-  if src="$(first_existing_path \
-    "$CONFIG_SOURCE_DIR/wallpapers" \
-    "$CONFIG_SOURCE_DIR/Pictures/wallpapers" \
-    "$CONFIG_SOURCE_DIR/pictures/wallpapers")"; then
-    local pictures_dir
-    pictures_dir="$(localized_pictures_dir)"
-    run_as_user mkdir -p "$pictures_dir"
-    replace_user_path_with_dir "$src" "$pictures_dir/$WALLPAPER_SUBDIR"
-  else
-    die "No wallpapers directory found in $CONFIG_SOURCE_DIR."
-  fi
+  local pictures_dir
+  pictures_dir="$(localized_pictures_dir)"
+  log "Installing repo wallpapers into $pictures_dir/$WALLPAPER_SUBDIR."
+  run_as_user mkdir -p "$pictures_dir"
+  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/wallpapers" "$pictures_dir/$WALLPAPER_SUBDIR"
 }
 
 detect_connected_outputs() {
