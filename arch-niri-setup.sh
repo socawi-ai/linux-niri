@@ -43,7 +43,8 @@ CURSOR_THEME="${CURSOR_THEME:-McMojave-cursors}"
 CURSOR_SIZE="${CURSOR_SIZE:-24}"
 WALLPAPER_PARENT_DIR="${WALLPAPER_PARENT_DIR:-}"
 WALLPAPER_SUBDIR="${WALLPAPER_SUBDIR:-wallpapers}"
-NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-10.jpg}"
+NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-13.png}"
+NOCTALIA_WALLPAPER_MONITORS="${NOCTALIA_WALLPAPER_MONITORS:-DP-3}"
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
 GTK_COLOR_SCHEME="${GTK_COLOR_SCHEME:-prefer-dark}"
@@ -919,6 +920,28 @@ detect_connected_outputs() {
   done
 }
 
+noctalia_wallpaper_outputs() {
+  local output
+  local configured_outputs=()
+  local detected_outputs=()
+  local seen_outputs=()
+  local seen
+
+  if [[ -n "$NOCTALIA_WALLPAPER_MONITORS" ]]; then
+    read -r -a configured_outputs <<<"$NOCTALIA_WALLPAPER_MONITORS"
+  fi
+  mapfile -t detected_outputs < <(detect_connected_outputs)
+
+  for output in "${configured_outputs[@]}" "${detected_outputs[@]}"; do
+    [[ -n "$output" ]] || continue
+    for seen in "${seen_outputs[@]}"; do
+      [[ "$seen" == "$output" ]] && continue 2
+    done
+    seen_outputs+=("$output")
+    printf '%s\n' "$output"
+  done
+}
+
 configure_noctalia_settings() {
   local wallpaper_dir
   local wallpaper_path
@@ -971,12 +994,12 @@ EOF
     [wallpaper.monitors."$output"]
     path = "$wallpaper_path"
 EOF
-  done < <(detect_connected_outputs)
+  done < <(noctalia_wallpaper_outputs)
 
   printf '%s\n' "$marker_end" >>"$tmp"
 
   if [[ "$found_output" == "0" ]]; then
-    warn "No connected monitor names were found under /sys/class/drm; Noctalia wallpaper config will use default and last only."
+    warn "No configured or connected monitor names were found; Noctalia wallpaper config will use default and last only."
   fi
 
   chmod 0644 "$tmp"
