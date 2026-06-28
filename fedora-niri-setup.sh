@@ -50,7 +50,7 @@ POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/release
 SLEEK_GRUB_THEME_REPO="${SLEEK_GRUB_THEME_REPO:-https://github.com/sandesh236/sleek--themes}"
 SLEEK_GRUB_THEME_DIR="${SLEEK_GRUB_THEME_DIR:-$HOME/.cache/fedora-niri-setup/sleek--themes}"
 SLEEK_GRUB_THEME_SOURCE_SUBDIR="${SLEEK_GRUB_THEME_SOURCE_SUBDIR:-Sleek theme-dark}"
-SLEEK_GRUB_THEME_TARGET="${SLEEK_GRUB_THEME_TARGET:-/boot/grub2/themes/sleek-theme-dark}"
+SLEEK_GRUB_THEME_TARGET="${SLEEK_GRUB_THEME_TARGET:-/boot/grub2/themes/sleek}"
 GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
 GRUB_CONFIG_FILE="${GRUB_CONFIG_FILE:-/etc/default/grub}"
 GRUB_MKCONFIG_OUTPUT="${GRUB_MKCONFIG_OUTPUT:-/boot/grub2/grub.cfg}"
@@ -666,8 +666,14 @@ install_grub_theme() {
 
   backup_system_path "$SLEEK_GRUB_THEME_TARGET"
   run_sudo rm -rf -- "$SLEEK_GRUB_THEME_TARGET"
-  run_sudo install -d -m 0755 "$(dirname "$SLEEK_GRUB_THEME_TARGET")"
-  run_sudo cp -a "$source_dir" "$SLEEK_GRUB_THEME_TARGET"
+  run_sudo install -d -m 0755 "$SLEEK_GRUB_THEME_TARGET"
+  run_sudo cp -a "$source_dir"/. "$SLEEK_GRUB_THEME_TARGET"/
+
+  if [[ ! -f "$SLEEK_GRUB_THEME_TARGET/theme.txt" ]]; then
+    warn "Sleek GRUB theme copy finished, but $SLEEK_GRUB_THEME_TARGET/theme.txt is missing."
+    return 0
+  fi
+
   record_change "Installed Sleek GRUB theme from $source_dir to $SLEEK_GRUB_THEME_TARGET."
 }
 
@@ -711,6 +717,23 @@ regenerate_grub_config() {
   fi
 }
 
+verify_grub_theme_config() {
+  [[ "$CONFIGURE_GRUB_THEME" == "1" ]] || return 0
+
+  if [[ ! -f "$SLEEK_GRUB_THEME_TARGET/theme.txt" ]]; then
+    warn "GRUB theme file is missing after install: $SLEEK_GRUB_THEME_TARGET/theme.txt"
+    return 0
+  fi
+
+  if [[ -f "$GRUB_CONFIG_FILE" ]] && ! grep -Fq "GRUB_THEME=\"$SLEEK_GRUB_THEME_TARGET/theme.txt\"" "$GRUB_CONFIG_FILE"; then
+    warn "$GRUB_CONFIG_FILE does not contain the expected GRUB_THEME path."
+  fi
+
+  if [[ -f "$GRUB_MKCONFIG_OUTPUT" ]] && ! grep -Fq "$(basename "$SLEEK_GRUB_THEME_TARGET")/theme.txt" "$GRUB_MKCONFIG_OUTPUT"; then
+    warn "$GRUB_MKCONFIG_OUTPUT does not reference the Sleek theme. Re-run grub2-mkconfig manually and check GRUB errors."
+  fi
+}
+
 configure_plymouth_and_grub() {
   [[ "$CONFIGURE_PLYMOUTH" == "1" || "$CONFIGURE_GRUB_THEME" == "1" ]] || return 0
 
@@ -735,12 +758,15 @@ configure_plymouth_and_grub() {
   install_grub_theme
 
   upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
+  upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
+  upsert_grub_default GRUB_GFXMODE "\"auto\""
   upsert_grub_default GRUB_TERMINAL_OUTPUT "\"gfxterm\""
   if [[ "$CONFIGURE_GRUB_THEME" == "1" && -f "$SLEEK_GRUB_THEME_TARGET/theme.txt" ]]; then
     upsert_grub_default GRUB_THEME "\"$SLEEK_GRUB_THEME_TARGET/theme.txt\""
   fi
 
   regenerate_grub_config
+  verify_grub_theme_config
   record_change "Configured GRUB timeout to $GRUB_TIMEOUT_SECONDS seconds."
 }
 
