@@ -522,6 +522,7 @@ install_fedora_packages() {
     pipewire-pulseaudio
     pipewire-alsa
     pipewire-jack-audio-connection-kit
+    pavucontrol
   )
 
   if [[ -n "$EXTRA_FEDORA_PACKAGES" ]]; then
