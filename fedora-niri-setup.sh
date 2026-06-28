@@ -6,10 +6,12 @@ CONFIG_REPO_DIR_WAS_SET=0
 CONFIG_SOURCE_DIR_WAS_SET=0
 USER_BACKUP_ROOT_WAS_SET=0
 MCMOJAVE_CURSORS_DIR_WAS_SET=0
+SLEEK_GRUB_THEME_DIR_WAS_SET=0
 [[ -n "${CONFIG_REPO_DIR+x}" ]] && CONFIG_REPO_DIR_WAS_SET=1
 [[ -n "${CONFIG_SOURCE_DIR+x}" ]] && CONFIG_SOURCE_DIR_WAS_SET=1
 [[ -n "${USER_BACKUP_ROOT+x}" ]] && USER_BACKUP_ROOT_WAS_SET=1
 [[ -n "${MCMOJAVE_CURSORS_DIR+x}" ]] && MCMOJAVE_CURSORS_DIR_WAS_SET=1
+[[ -n "${SLEEK_GRUB_THEME_DIR+x}" ]] && SLEEK_GRUB_THEME_DIR_WAS_SET=1
 CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
 CONFIG_REPO_DIR="${CONFIG_REPO_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri}"
 CONFIG_SOURCE_DIR="${CONFIG_SOURCE_DIR:-}"
@@ -19,15 +21,19 @@ EXTRA_FEDORA_PACKAGES="${EXTRA_FEDORA_PACKAGES:-}"
 
 ENABLE_NOCTALIA_COPR="${ENABLE_NOCTALIA_COPR:-1}"
 ENABLE_GREETD="${ENABLE_GREETD:-1}"
-ENABLE_FLATHUB="${ENABLE_FLATHUB:-1}"
+ENABLE_FEDORA_THIRD_PARTY_REPOS="${ENABLE_FEDORA_THIRD_PARTY_REPOS:-1}"
+ENABLE_RPMFUSION="${ENABLE_RPMFUSION:-1}"
 INSTALL_STEAM="${INSTALL_STEAM:-1}"
-INSTALL_BITWARDEN="${INSTALL_BITWARDEN:-1}"
 INSTALL_VSCODE="${INSTALL_VSCODE:-1}"
 INSTALL_MCMOJAVE_CURSORS="${INSTALL_MCMOJAVE_CURSORS:-1}"
 INSTALL_NAUTILUS_OPEN_ANY_TERMINAL="${INSTALL_NAUTILUS_OPEN_ANY_TERMINAL:-1}"
 INSTALL_LSFG_VK="${INSTALL_LSFG_VK:-1}"
 INSTALL_POLARIS="${INSTALL_POLARIS:-1}"
 SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
+ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
+ENABLE_POLARIS_LINGER="${ENABLE_POLARIS_LINGER:-1}"
+CONFIGURE_PLYMOUTH="${CONFIGURE_PLYMOUTH:-1}"
+CONFIGURE_GRUB_THEME="${CONFIGURE_GRUB_THEME:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 NOCTALIA_COPR="${NOCTALIA_COPR:-lionheartp/Hyprland}"
 NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
@@ -40,6 +46,13 @@ MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
 LSFG_VK_RELEASE_API="${LSFG_VK_RELEASE_API:-https://api.github.com/repos/PancakeTAS/lsfg-vk/releases/latest}"
 LSFG_VK_ASSET_REGEX="${LSFG_VK_ASSET_REGEX:-lsfg-vk-.*(linux|x86_64).*\\.tar\\.xz$}"
 POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
+SLEEK_GRUB_THEME_REPO="${SLEEK_GRUB_THEME_REPO:-https://github.com/sandesh236/sleek--themes}"
+SLEEK_GRUB_THEME_DIR="${SLEEK_GRUB_THEME_DIR:-$HOME/.cache/fedora-niri-setup/sleek--themes}"
+SLEEK_GRUB_THEME_SOURCE_SUBDIR="${SLEEK_GRUB_THEME_SOURCE_SUBDIR:-Sleek theme-dark}"
+SLEEK_GRUB_THEME_TARGET="${SLEEK_GRUB_THEME_TARGET:-/boot/grub2/themes/sleek-theme-dark}"
+GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
+GRUB_CONFIG_FILE="${GRUB_CONFIG_FILE:-/etc/default/grub}"
+GRUB_MKCONFIG_OUTPUT="${GRUB_MKCONFIG_OUTPUT:-/boot/grub2/grub.cfg}"
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
 NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-13.png}"
@@ -220,6 +233,10 @@ resolve_target_user() {
 
   if [[ "$MCMOJAVE_CURSORS_DIR_WAS_SET" == "0" ]]; then
     MCMOJAVE_CURSORS_DIR="$TARGET_HOME/.cache/fedora-niri-setup/McMojave-cursors"
+  fi
+
+  if [[ "$SLEEK_GRUB_THEME_DIR_WAS_SET" == "0" ]]; then
+    SLEEK_GRUB_THEME_DIR="$TARGET_HOME/.cache/fedora-niri-setup/sleek--themes"
   fi
 
   log "Target user: $TARGET_USER"
@@ -411,7 +428,12 @@ install_fedora_packages() {
     gh
     tar
     xz
-    flatpak
+    fedora-workstation-repositories
+    grubby
+    grub2-tools
+    plymouth
+    plymouth-plugin-spinner
+    plymouth-system-theme
     niri
     greetd
     greetd-selinux
@@ -468,61 +490,214 @@ install_fedora_packages() {
   record_change "Installed or verified Fedora packages for a basic Niri desktop."
 }
 
-enable_flathub() {
-  [[ "$ENABLE_FLATHUB" == "1" ]] || {
-    log "Flathub enablement is disabled."
+enable_fedora_third_party_repos() {
+  [[ "$ENABLE_FEDORA_THIRD_PARTY_REPOS" == "1" ]] || {
+    log "Fedora third-party repository enablement is disabled."
     return 0
   }
 
-  have_command flatpak || {
-    warn "flatpak is not available; skipping Flathub setup."
-    return 1
-  }
+  dnf_install fedora-workstation-repositories
 
-  if flatpak remotes --system | awk '{ print $1 }' | grep -Fxq flathub; then
-    log "Flathub system remote is already enabled."
+  if have_command fedora-third-party; then
+    log "Enabling Fedora third-party repositories."
+    run_sudo fedora-third-party enable || warn "fedora-third-party enable failed."
+    record_change "Enabled Fedora third-party repositories."
   else
-    log "Enabling Flathub system remote."
-    run_sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-    record_change "Enabled Flathub system remote."
+    warn "fedora-third-party command is not available after installing fedora-workstation-repositories."
   fi
 }
 
-install_flatpak_app() {
-  local app_id="$1"
-  local label="$2"
-
-  have_command flatpak || {
-    warn "flatpak is not available; skipping $label."
-    return 1
+enable_rpmfusion() {
+  [[ "$ENABLE_RPMFUSION" == "1" ]] || {
+    log "RPM Fusion enablement is disabled."
+    return 0
   }
 
-  if flatpak info --system "$app_id" >/dev/null 2>&1; then
-    log "$label is already installed as a system Flatpak."
+  local fedora_version
+  fedora_version="$(rpm -E %fedora)"
+
+  log "Enabling RPM Fusion free and nonfree repositories."
+  dnf_install \
+    "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_version}.noarch.rpm" \
+    "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_version}.noarch.rpm"
+
+  run_sudo "$DNF_BIN" makecache -y
+  record_change "Enabled RPM Fusion free and nonfree repositories."
+}
+
+install_steam() {
+  [[ "$INSTALL_STEAM" == "1" ]] || {
+    log "Steam installation is disabled."
+    return 0
+  }
+
+  enable_fedora_third_party_repos
+  enable_rpmfusion
+
+  log "Installing Steam from RPM Fusion."
+  if dnf_install_optional steam; then
+    record_change "Installed Steam from RPM Fusion."
+  fi
+}
+
+set_systemd_user_service() {
+  local service="$1"
+
+  if [[ "$ENABLE_POLARIS_LINGER" == "1" ]]; then
+    run_sudo loginctl enable-linger "$TARGET_USER" || warn "Could not enable linger for $TARGET_USER."
+  fi
+
+  local user_id
+  user_id="$(id -u "$TARGET_USER")"
+  if [[ -d "/run/user/$user_id" ]]; then
+    if run_as_user env XDG_RUNTIME_DIR="/run/user/$user_id" systemctl --user enable --now "$service"; then
+      return 0
+    fi
+    warn "Could not enable and start user service $service now."
+  else
+    if run_as_user systemctl --user enable "$service"; then
+      warn "Enabled $service for user autostart, but could not start it now because /run/user/$user_id does not exist."
+      return 0
+    fi
+    warn "Could not enable user service $service."
+  fi
+
+  return 1
+}
+
+configure_polaris_autostart() {
+  [[ "$ENABLE_POLARIS_AUTOSTART" == "1" ]] || {
+    log "Polaris autostart is disabled."
+    return 0
+  }
+
+  if set_systemd_user_service polaris.service; then
+    record_change "Enabled Polaris user service autostart."
+  fi
+}
+
+find_sleek_dark_grub_theme_dir() {
+  local configured_dir="$SLEEK_GRUB_THEME_DIR/$SLEEK_GRUB_THEME_SOURCE_SUBDIR"
+  local theme_file
+  local lower_theme_file
+  local fallback_dir=""
+
+  if [[ -f "$configured_dir/theme.txt" ]]; then
+    printf '%s\n' "$configured_dir"
     return 0
   fi
 
-  log "Installing $label from Flathub."
-  if [[ "$ASSUME_YES" == "1" ]]; then
-    run_sudo flatpak install --system -y flathub "$app_id"
-  else
-    run_sudo flatpak install --system flathub "$app_id"
-  fi
-  record_change "Installed $label from Flathub."
+  while IFS= read -r theme_file; do
+    [[ -n "$theme_file" ]] || continue
+    lower_theme_file="${theme_file,,}"
+    if [[ "$lower_theme_file" == *dark* ]]; then
+      dirname "$theme_file"
+      return 0
+    fi
+    [[ -n "$fallback_dir" ]] || fallback_dir="$(dirname "$theme_file")"
+  done < <(find "$SLEEK_GRUB_THEME_DIR" -maxdepth 4 -type f -name theme.txt -print 2>/dev/null | sort)
+
+  [[ -n "$fallback_dir" ]] || return 1
+  printf '%s\n' "$fallback_dir"
 }
 
-install_flatpak_apps() {
-  [[ "$INSTALL_STEAM" == "1" || "$INSTALL_BITWARDEN" == "1" ]] || return 0
+install_grub_theme() {
+  [[ "$CONFIGURE_GRUB_THEME" == "1" ]] || {
+    log "GRUB theme configuration is disabled."
+    return 0
+  }
 
-  enable_flathub || return 0
+  clone_or_update_git_repo "$SLEEK_GRUB_THEME_REPO" "$SLEEK_GRUB_THEME_DIR"
 
-  if [[ "$INSTALL_STEAM" == "1" ]]; then
-    install_flatpak_app com.valvesoftware.Steam Steam || warn "Steam Flatpak installation failed."
+  local source_dir
+  if ! source_dir="$(find_sleek_dark_grub_theme_dir)"; then
+    warn "No Sleek GRUB theme.txt file was found in $SLEEK_GRUB_THEME_DIR."
+    return 0
   fi
 
-  if [[ "$INSTALL_BITWARDEN" == "1" ]]; then
-    install_flatpak_app com.bitwarden.desktop Bitwarden || warn "Bitwarden Flatpak installation failed."
+  case "$SLEEK_GRUB_THEME_TARGET" in
+    /boot/grub2/themes/*|/boot/grub/themes/*) ;;
+    *) die "Refusing to install GRUB theme outside a GRUB themes directory: $SLEEK_GRUB_THEME_TARGET" ;;
+  esac
+
+  backup_system_path "$SLEEK_GRUB_THEME_TARGET"
+  run_sudo rm -rf -- "$SLEEK_GRUB_THEME_TARGET"
+  run_sudo install -d -m 0755 "$(dirname "$SLEEK_GRUB_THEME_TARGET")"
+  run_sudo cp -a "$source_dir" "$SLEEK_GRUB_THEME_TARGET"
+  record_change "Installed Sleek GRUB theme from $source_dir to $SLEEK_GRUB_THEME_TARGET."
+}
+
+upsert_grub_default() {
+  local key="$1"
+  local value="$2"
+  local path="$GRUB_CONFIG_FILE"
+  local tmp
+
+  [[ -f "$path" ]] || {
+    warn "$path does not exist; skipping GRUB default update for $key."
+    return 0
+  }
+
+  backup_system_path "$path"
+  tmp="$(mktemp)"
+
+  awk -v key="$key" -v value="$value" '
+    BEGIN { replaced = 0 }
+    $0 ~ "^[[:space:]]*#?[[:space:]]*" key "=" {
+      print key "=" value
+      replaced = 1
+      next
+    }
+    { print }
+    END {
+      if (!replaced) print key "=" value
+    }
+  ' "$path" >"$tmp"
+
+  run_sudo install -m 0644 "$tmp" "$path"
+  rm -f "$tmp"
+}
+
+regenerate_grub_config() {
+  if have_command grub2-mkconfig; then
+    run_sudo grub2-mkconfig -o "$GRUB_MKCONFIG_OUTPUT"
+    record_change "Regenerated GRUB config at $GRUB_MKCONFIG_OUTPUT."
+  else
+    warn "grub2-mkconfig was not found; GRUB config was not regenerated."
   fi
+}
+
+configure_plymouth_and_grub() {
+  [[ "$CONFIGURE_PLYMOUTH" == "1" || "$CONFIGURE_GRUB_THEME" == "1" ]] || return 0
+
+  if [[ "$CONFIGURE_PLYMOUTH" == "1" ]]; then
+    log "Installing and configuring Plymouth spinner theme."
+    dnf_install plymouth plymouth-plugin-spinner plymouth-system-theme grubby
+
+    if have_command plymouth-set-default-theme; then
+      run_sudo plymouth-set-default-theme -R spinner
+      record_change "Configured Plymouth spinner theme."
+    else
+      warn "plymouth-set-default-theme was not found; Plymouth theme was not changed."
+    fi
+
+    if have_command grubby; then
+      run_sudo grubby --update-kernel=ALL --args="rhgb quiet splash" || warn "Could not add Plymouth kernel arguments with grubby."
+    else
+      warn "grubby was not found; kernel arguments were not updated."
+    fi
+  fi
+
+  install_grub_theme
+
+  upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
+  upsert_grub_default GRUB_TERMINAL_OUTPUT "\"gfxterm\""
+  if [[ "$CONFIGURE_GRUB_THEME" == "1" && -f "$SLEEK_GRUB_THEME_TARGET/theme.txt" ]]; then
+    upsert_grub_default GRUB_THEME "\"$SLEEK_GRUB_THEME_TARGET/theme.txt\""
+  fi
+
+  regenerate_grub_config
+  record_change "Configured GRUB timeout to $GRUB_TIMEOUT_SECONDS seconds."
 }
 
 install_vscode() {
@@ -690,7 +865,8 @@ install_lsfg_vk() {
   fi
 
   local downloads_dir="$TARGET_HOME/.cache/fedora-niri-setup/downloads"
-  local archive="$downloads_dir/$(basename "$asset_url")"
+  local archive
+  archive="$downloads_dir/$(basename "$asset_url")"
 
   log "Downloading LSFG-VK from $asset_url."
   if ! download_as_user "$asset_url" "$archive"; then
@@ -747,11 +923,13 @@ install_polaris() {
   else
     record_change "Installed Polaris package."
   fi
+
+  configure_polaris_autostart
 }
 
 install_default_apps() {
   install_vscode
-  install_flatpak_apps
+  install_steam
   install_mcmojave_cursors
   install_nautilus_open_any_terminal
   install_lsfg_vk
@@ -1257,6 +1435,9 @@ main() {
 
   section "Default apps"
   install_default_apps
+
+  section "Boot visuals"
+  configure_plymouth_and_grub
 
   section "Noctalia"
   install_noctalia_packages
