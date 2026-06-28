@@ -31,7 +31,7 @@ It installs and configures:
 - LSFG-VK
 - Polaris with host setup and user-service autostart
 - Plymouth spinner
-- GRUB timeout and dark Sleek GRUB theme
+- GRUB timeout and the forked dark Sleek GRUB theme in `grub/sleek-dark/`
 
 It also downloads this repo's configs and wallpapers:
 
@@ -80,3 +80,8 @@ Arch:
 - system backups: `/var/backups/arch-niri-setup/`
 
 Each run also writes a timestamped log file in the user's home directory.
+
+## Vendored Theme
+
+`grub/sleek-dark/` is a local copy of the dark Sleek GRUB theme from
+`sandesh236/sleek--themes`. Its MIT license is kept with the theme files.
