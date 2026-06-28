@@ -11,7 +11,7 @@
 }
 
     cursor {
-        xcursor-theme "mcmojave-cursors"
+        xcursor-theme "McMojave-cursors"
         xcursor-size 24
 }
 

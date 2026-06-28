@@ -67,6 +67,7 @@ GTK_COLOR_SCHEME="${GTK_COLOR_SCHEME:-prefer-dark}"
 GTK_THEME_NAME="${GTK_THEME_NAME:-Adwaita-dark}"
 GTK_APPLICATION_PREFER_DARK="${GTK_APPLICATION_PREFER_DARK:-1}"
 GTK_CURSOR_THEME="${GTK_CURSOR_THEME:-$MCMOJAVE_CURSOR_THEME}"
+XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
 WALLPAPER_PARENT_DIR="${WALLPAPER_PARENT_DIR:-}"
 WALLPAPER_SUBDIR="${WALLPAPER_SUBDIR:-wallpapers}"
 
@@ -883,25 +884,16 @@ install_mcmojave_cursors() {
 
   clone_or_update_git_repo "$MCMOJAVE_CURSORS_REPO" "$MCMOJAVE_CURSORS_DIR"
 
-  local theme_dirs=()
-  shopt -s nullglob
-  theme_dirs=("$MCMOJAVE_CURSORS_DIR"/dist/*)
-  shopt -u nullglob
-
-  ((${#theme_dirs[@]})) || {
-    warn "No cursor themes found in $MCMOJAVE_CURSORS_DIR/dist; skipping McMojave cursor install."
+  local theme_dir="$MCMOJAVE_CURSORS_DIR/dist"
+  if [[ ! -d "$theme_dir" || ! -f "$theme_dir/index.theme" ]]; then
+    warn "No installable cursor theme found at $theme_dir; skipping McMojave cursor install."
     return 0
-  }
+  fi
 
   run_as_user mkdir -p "$TARGET_HOME/.local/share/icons"
+  replace_user_path_with_dir "$theme_dir" "$TARGET_HOME/.local/share/icons/$MCMOJAVE_CURSOR_THEME"
 
-  local theme_dir
-  for theme_dir in "${theme_dirs[@]}"; do
-    [[ -d "$theme_dir" ]] || continue
-    replace_user_path_with_dir "$theme_dir" "$TARGET_HOME/.local/share/icons/$(basename "$theme_dir")"
-  done
-
-  record_change "Installed McMojave cursor themes to $TARGET_HOME/.local/share/icons."
+  record_change "Installed McMojave cursor theme to $TARGET_HOME/.local/share/icons/$MCMOJAVE_CURSOR_THEME."
 }
 
 install_nautilus_open_any_terminal() {
@@ -1328,13 +1320,20 @@ MOZ_ENABLE_WAYLAND=1
 QT_QPA_PLATFORM=wayland;xcb
 QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 XKB_DEFAULT_LAYOUT=$XKB_LAYOUT
+XCURSOR_THEME=$GTK_CURSOR_THEME
+XCURSOR_SIZE=$XCURSOR_SIZE
+EOF
+
+  write_user_file "$TARGET_HOME/.icons/default/index.theme" 0644 <<EOF
+[Icon Theme]
+Inherits=$GTK_CURSOR_THEME
 EOF
 
   if have_command xdg-user-dirs-update; then
     run_as_user xdg-user-dirs-update || warn "xdg-user-dirs-update failed for $TARGET_USER."
   fi
 
-  record_change "Configured basic user environment for Niri and Wayland apps."
+  record_change "Configured basic user environment, cursor defaults, and Wayland app settings."
 }
 
 upsert_gtk_settings_file() {
