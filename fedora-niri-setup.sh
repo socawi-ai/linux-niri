@@ -18,6 +18,7 @@ CONFIG_SOURCE_DIR="${CONFIG_SOURCE_DIR:-}"
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-$USER}}"
 ASSUME_YES="${ASSUME_YES:-0}"
 EXTRA_FEDORA_PACKAGES="${EXTRA_FEDORA_PACKAGES:-}"
+DNF_SKIP_UNAVAILABLE="${DNF_SKIP_UNAVAILABLE:-1}"
 
 ENABLE_NOCTALIA_COPR="${ENABLE_NOCTALIA_COPR:-1}"
 ENABLE_GREETD="${ENABLE_GREETD:-1}"
@@ -379,6 +380,10 @@ dnf_install() {
 
   if [[ "$ASSUME_YES" == "1" ]]; then
     args+=(-y)
+  fi
+
+  if [[ "$DNF_SKIP_UNAVAILABLE" == "1" ]]; then
+    args+=(--skip-unavailable)
   fi
 
   run_sudo "$DNF_BIN" "${args[@]}" "${packages[@]}"
