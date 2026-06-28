@@ -22,6 +22,7 @@ It installs and configures:
 - Fish
 - Firefox
 - PipeWire
+- pavucontrol
 - desktop portals
 - GTK/Qt Wayland support
 - McMojave cursors
