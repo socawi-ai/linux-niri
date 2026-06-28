@@ -61,3 +61,6 @@ blue = "0x89b4fa"
 magenta = "0xf5c2e7"
 cyan = "0x94e2d5"
 white = "0xa6adc8"
+
+[terminal]
+shell = { program = "/usr/bin/fish", args = ["-l"] }
