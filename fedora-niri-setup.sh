@@ -646,6 +646,22 @@ find_sleek_dark_grub_theme_dir() {
   printf '%s\n' "$fallback_dir"
 }
 
+resolve_grub_theme_payload_dir() {
+  local source_dir="$1"
+
+  if [[ -f "$source_dir/theme.txt" ]]; then
+    printf '%s\n' "$source_dir"
+    return 0
+  fi
+
+  if [[ -f "$source_dir/sleek/theme.txt" ]]; then
+    printf '%s\n' "$source_dir/sleek"
+    return 0
+  fi
+
+  return 1
+}
+
 install_grub_theme() {
   [[ "$CONFIGURE_GRUB_THEME" == "1" ]] || {
     log "GRUB theme configuration is disabled."
@@ -655,8 +671,14 @@ install_grub_theme() {
   clone_or_update_git_repo "$SLEEK_GRUB_THEME_REPO" "$SLEEK_GRUB_THEME_DIR" "$SLEEK_GRUB_THEME_BRANCH"
 
   local source_dir
+  local payload_dir
   if ! source_dir="$(find_sleek_dark_grub_theme_dir)"; then
     warn "No Sleek GRUB theme.txt file was found in $SLEEK_GRUB_THEME_DIR."
+    return 0
+  fi
+
+  if ! payload_dir="$(resolve_grub_theme_payload_dir "$source_dir")"; then
+    warn "Sleek GRUB theme source $source_dir does not contain theme.txt or sleek/theme.txt."
     return 0
   fi
 
@@ -668,14 +690,14 @@ install_grub_theme() {
   backup_system_path "$SLEEK_GRUB_THEME_TARGET"
   run_sudo rm -rf -- "$SLEEK_GRUB_THEME_TARGET"
   run_sudo install -d -m 0755 "$SLEEK_GRUB_THEME_TARGET"
-  run_sudo cp -a "$source_dir"/. "$SLEEK_GRUB_THEME_TARGET"/
+  run_sudo cp -a "$payload_dir"/. "$SLEEK_GRUB_THEME_TARGET"/
 
-  if [[ ! -f "$SLEEK_GRUB_THEME_TARGET/theme.txt" ]]; then
+  if ! run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
     warn "Sleek GRUB theme copy finished, but $SLEEK_GRUB_THEME_TARGET/theme.txt is missing."
     return 0
   fi
 
-  record_change "Installed Sleek GRUB theme from $source_dir to $SLEEK_GRUB_THEME_TARGET."
+  record_change "Installed Sleek GRUB theme from $payload_dir to $SLEEK_GRUB_THEME_TARGET."
 }
 
 upsert_grub_default() {
