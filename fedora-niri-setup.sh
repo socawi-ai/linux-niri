@@ -791,7 +791,7 @@ configure_plymouth_and_grub() {
 
   upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
   upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
-  upsert_grub_default GRUB_GFXMODE "\"auto\""
+  upsert_grub_default GRUB_GFXMODE "\"3440x1440,2560x1440,1920x1080,auto\""
   upsert_grub_default GRUB_TERMINAL_OUTPUT "\"gfxterm\""
   if [[ "$CONFIGURE_GRUB_THEME" == "1" ]] && run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
     upsert_grub_default GRUB_THEME "\"$SLEEK_GRUB_THEME_TARGET/theme.txt\""
