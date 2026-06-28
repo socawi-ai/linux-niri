@@ -76,6 +76,7 @@ SYSTEM_BACKUP_ROOT="${SYSTEM_BACKUP_ROOT:-/var/backups/fedora-niri-setup/$TIMEST
 
 TARGET_HOME="$HOME"
 DNF_BIN=""
+DNF_SKIP_UNAVAILABLE_SUPPORTED=""
 STEP_COUNT=0
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
@@ -383,7 +384,18 @@ dnf_install() {
   fi
 
   if [[ "$DNF_SKIP_UNAVAILABLE" == "1" ]]; then
-    args+=(--skip-unavailable)
+    if [[ -z "$DNF_SKIP_UNAVAILABLE_SUPPORTED" ]]; then
+      if "$DNF_BIN" install --help 2>&1 | grep -q -- '--skip-unavailable'; then
+        DNF_SKIP_UNAVAILABLE_SUPPORTED=1
+      else
+        DNF_SKIP_UNAVAILABLE_SUPPORTED=0
+        warn "$DNF_BIN does not support --skip-unavailable; using best-effort package fallback instead."
+      fi
+    fi
+
+    if [[ "$DNF_SKIP_UNAVAILABLE_SUPPORTED" == "1" ]]; then
+      args+=(--skip-unavailable)
+    fi
   fi
 
   run_sudo "$DNF_BIN" "${args[@]}" "${packages[@]}"
@@ -398,6 +410,29 @@ dnf_install_optional() {
   return 1
 }
 
+dnf_install_best_effort() {
+  local packages=("$@")
+  local package
+  local failed=0
+
+  if dnf_install "${packages[@]}"; then
+    return 0
+  fi
+
+  warn "Batch package install failed; retrying packages one at a time and skipping failures."
+  for package in "${packages[@]}"; do
+    if ! dnf_install_optional "$package"; then
+      failed=1
+    fi
+  done
+
+  if [[ "$failed" == "1" ]]; then
+    warn "Some packages could not be installed. Continuing so later setup steps can run."
+  fi
+
+  return 0
+}
+
 enable_copr_repo() {
   local copr="$1"
   local label="${2:-$copr}"
@@ -405,7 +440,7 @@ enable_copr_repo() {
   local repo_name="${copr#*/}"
   local repo_glob="/etc/yum.repos.d/*${repo_owner}*${repo_name}*.repo"
 
-  dnf_install dnf-plugins-core
+  dnf_install_best_effort dnf-plugins-core
 
   if compgen -G "$repo_glob" >/dev/null; then
     log "COPR $copr appears to be enabled."
@@ -413,8 +448,12 @@ enable_copr_repo() {
   fi
 
   log "Enabling COPR $copr for $label."
-  run_sudo "$DNF_BIN" copr enable -y "$copr"
-  record_change "Enabled COPR $copr."
+  if run_sudo "$DNF_BIN" copr enable -y "$copr"; then
+    record_change "Enabled COPR $copr."
+  else
+    warn "Could not enable COPR $copr."
+    return 1
+  fi
 }
 
 install_fedora_packages() {
@@ -491,8 +530,8 @@ install_fedora_packages() {
   fi
 
   log "Installing Fedora packages with $DNF_BIN."
-  dnf_install "${packages[@]}"
-  record_change "Installed or verified Fedora packages for a basic Niri desktop."
+  dnf_install_best_effort "${packages[@]}"
+  record_change "Installed or attempted Fedora packages for a basic Niri desktop."
 }
 
 enable_fedora_third_party_repos() {
@@ -501,7 +540,7 @@ enable_fedora_third_party_repos() {
     return 0
   }
 
-  dnf_install fedora-workstation-repositories
+  dnf_install_best_effort fedora-workstation-repositories
 
   if have_command fedora-third-party; then
     log "Enabling Fedora third-party repositories."
@@ -522,11 +561,11 @@ enable_rpmfusion() {
   fedora_version="$(rpm -E %fedora)"
 
   log "Enabling RPM Fusion free and nonfree repositories."
-  dnf_install \
+  dnf_install_best_effort \
     "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_version}.noarch.rpm" \
     "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_version}.noarch.rpm"
 
-  run_sudo "$DNF_BIN" makecache -y
+  run_sudo "$DNF_BIN" makecache -y || warn "RPM Fusion makecache failed."
   record_change "Enabled RPM Fusion free and nonfree repositories."
 }
 
@@ -677,7 +716,7 @@ configure_plymouth_and_grub() {
 
   if [[ "$CONFIGURE_PLYMOUTH" == "1" ]]; then
     log "Installing and configuring Plymouth spinner theme."
-    dnf_install plymouth plymouth-plugin-spinner plymouth-system-theme grubby
+    dnf_install_best_effort plymouth plymouth-plugin-spinner plymouth-system-theme grubby
 
     if have_command plymouth-set-default-theme; then
       run_sudo plymouth-set-default-theme -R spinner
