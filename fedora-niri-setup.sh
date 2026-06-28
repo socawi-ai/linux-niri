@@ -690,10 +690,17 @@ install_grub_theme() {
   backup_system_path "$SLEEK_GRUB_THEME_TARGET"
   run_sudo rm -rf -- "$SLEEK_GRUB_THEME_TARGET"
   run_sudo install -d -m 0755 "$SLEEK_GRUB_THEME_TARGET"
-  run_sudo cp -a "$payload_dir"/. "$SLEEK_GRUB_THEME_TARGET"/
+
+  local theme_archive
+  theme_archive="$(mktemp)"
+  tar -C "$payload_dir" -cf "$theme_archive" .
+  run_sudo tar -C "$SLEEK_GRUB_THEME_TARGET" -xf "$theme_archive"
+  run_sudo chown -R root:root "$SLEEK_GRUB_THEME_TARGET"
+  rm -f "$theme_archive"
 
   if ! run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
     warn "Sleek GRUB theme copy finished, but $SLEEK_GRUB_THEME_TARGET/theme.txt is missing."
+    run_sudo find "$SLEEK_GRUB_THEME_TARGET" -maxdepth 2 -type f -print 2>/dev/null || true
     return 0
   fi
 
