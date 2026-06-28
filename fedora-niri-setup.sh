@@ -1283,7 +1283,7 @@ ensure_niri_autostarts_noctalia() {
     return 0
   fi
 
-  if grep -Eq '^[[:space:]]*spawn-at-startup[[:space:]]+"noctalia"' "$target_file"; then
+  if grep -Fq 'spawn-at-startup "sh" "-c" "sleep 3; exec noctalia"' "$target_file"; then
     log "Niri already autostarts Noctalia in $target_file."
     return 0
   fi
@@ -1292,13 +1292,13 @@ ensure_niri_autostarts_noctalia() {
   local tmp
   tmp="$(mktemp)"
   grep -Ev \
-    '^[[:space:]]*spawn-at-startup[[:space:]]+.*(noctalia-shell|noctalia-qs|"qs"[[:space:]]+"-c"[[:space:]]+"noctalia|quickshell.*noctalia)' \
+    '^[[:space:]]*spawn-at-startup[[:space:]]+.*(noctalia|noctalia-shell|noctalia-qs|"qs"[[:space:]]+"-c"[[:space:]]+"noctalia|quickshell.*noctalia)' \
     "$target_file" >"$tmp"
 
   cat >>"$tmp" <<'EOF'
 
 // Noctalia v5
-spawn-at-startup "noctalia"
+spawn-at-startup "sh" "-c" "sleep 3; exec noctalia"
 EOF
 
   chmod 0644 "$tmp"
