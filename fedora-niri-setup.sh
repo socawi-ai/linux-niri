@@ -45,7 +45,7 @@ MCMOJAVE_CURSORS_REPO="${MCMOJAVE_CURSORS_REPO:-https://github.com/vinceliuice/M
 MCMOJAVE_CURSORS_DIR="${MCMOJAVE_CURSORS_DIR:-$HOME/.cache/fedora-niri-setup/McMojave-cursors}"
 MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
 LSFG_VK_RELEASE_API="${LSFG_VK_RELEASE_API:-https://api.github.com/repos/PancakeTAS/lsfg-vk/releases/latest}"
-LSFG_VK_ASSET_REGEX="${LSFG_VK_ASSET_REGEX:-lsfg-vk-.*(linux|x86_64).*\\.tar\\.xz$}"
+LSFG_VK_ASSET_REGEX="${LSFG_VK_ASSET_REGEX:-lsfg-vk-.*x86_64\\.rpm$}"
 POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
 SLEEK_GRUB_THEME_REPO="${SLEEK_GRUB_THEME_REPO:-$CONFIG_REPO_URL}"
 SLEEK_GRUB_THEME_BRANCH="${SLEEK_GRUB_THEME_BRANCH:-$CONFIG_REPO_BRANCH}"
@@ -965,22 +965,32 @@ install_lsfg_vk() {
   fi
 
   local downloads_dir="$TARGET_HOME/.cache/fedora-niri-setup/downloads"
-  local archive
-  archive="$downloads_dir/$(basename "$asset_url")"
+  local package_path
+  package_path="$downloads_dir/$(basename "$asset_url")"
 
   log "Downloading LSFG-VK from $asset_url."
-  if ! download_as_user "$asset_url" "$archive"; then
+  if ! download_as_user "$asset_url" "$package_path"; then
     warn "Could not download LSFG-VK."
     return 0
   fi
 
-  run_as_user mkdir -p "$TARGET_HOME/.local"
-  if ! run_as_user tar -xJf "$archive" -C "$TARGET_HOME/.local"; then
-    warn "Could not extract LSFG-VK archive."
+  case "$package_path" in
+    *.rpm)
+      if dnf_install_optional "$package_path"; then
+        record_change "Installed LSFG-VK from latest GitHub release RPM."
+      else
+        warn "Could not install LSFG-VK RPM."
+      fi
+      ;;
+    *)
+      warn "Downloaded LSFG-VK asset is not an RPM: $package_path"
+      ;;
+  esac
+
+  if ! package_installed lsfg-vk; then
+    warn "LSFG-VK package is not installed after the GitHub release step."
     return 0
   fi
-
-  record_change "Installed LSFG-VK into $TARGET_HOME/.local."
 }
 
 install_polaris() {
