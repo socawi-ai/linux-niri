@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-STEAM_DRIVE_UUID="${STEAM_DRIVE_UUID:-b633b102-ad34-443f-969f-b59ed480fa2d}"
+STEAM_DRIVE_UUID="${STEAM_DRIVE_UUID:-}"
 STEAM_DRIVE_MOUNT="${STEAM_DRIVE_MOUNT:-/mnt/steam}"
 STEAM_DRIVE_FSTYPE="${STEAM_DRIVE_FSTYPE:-ext4}"
 STEAM_DRIVE_OPTIONS="${STEAM_DRIVE_OPTIONS:-defaults,noatime}"
+ASSUME_YES="${ASSUME_YES:-0}"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 FSTAB_BACKUP="/etc/fstab.bak.$TIMESTAMP"
@@ -26,6 +27,66 @@ require_normal_user() {
   [[ "$EUID" -ne 0 ]] || die "Run this script as your normal user, not directly as root."
   command -v findmnt >/dev/null 2>&1 || die "findmnt is required."
   command -v blkid >/dev/null 2>&1 || die "blkid is required."
+  command -v lsblk >/dev/null 2>&1 || die "lsblk is required."
+}
+
+choose_steam_drive_uuid() {
+  [[ -z "$STEAM_DRIVE_UUID" ]] || return 0
+  [[ "$ASSUME_YES" != "1" ]] || die "STEAM_DRIVE_UUID is required when ASSUME_YES=1."
+  [[ -r /dev/tty && -w /dev/tty ]] || die "No interactive terminal available. Set STEAM_DRIVE_UUID explicitly."
+
+  local candidates=()
+  local line
+  local index=1
+  local answer
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    candidates+=("$line")
+  done < <(lsblk -r -p -n -o NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT,TYPE | awk '
+    $7 == "part" && $5 != "" && $3 ~ /^(ext4|btrfs|xfs|ntfs|exfat|vfat)$/ {
+      print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6
+    }
+  ')
+
+  ((${#candidates[@]})) || die "No mountable partitions with UUIDs found. Check with: lsblk -f"
+
+  printf '\nAvailable partitions:\n' >/dev/tty
+  for line in "${candidates[@]}"; do
+    local name=""
+    local size=""
+    local fstype=""
+    local label=""
+    local uuid=""
+    local mountpoint=""
+
+    IFS=$'\t' read -r name size fstype label uuid mountpoint <<<"$line"
+    printf ' %2d) %-22s %-8s %-7s label=%-16s uuid=%s mounted=%s\n' \
+      "$index" "$name" "$size" "$fstype" "$label" "$uuid" "$mountpoint" >/dev/tty
+    index=$((index + 1))
+  done
+
+  while true; do
+    printf '\nChoose the Steam drive partition number: ' >/dev/tty
+    IFS= read -r answer </dev/tty
+    if [[ "$answer" =~ ^[0-9]+$ ]] && ((answer >= 1 && answer <= ${#candidates[@]})); then
+      local name=""
+      local size=""
+      local fstype=""
+      local label=""
+      local uuid=""
+      local mountpoint=""
+
+      IFS=$'\t' read -r name size fstype label uuid mountpoint <<<"${candidates[$((answer - 1))]}"
+      STEAM_DRIVE_UUID="$uuid"
+      if [[ -n "$fstype" ]]; then
+        STEAM_DRIVE_FSTYPE="$fstype"
+      fi
+      log "Selected $name UUID=$STEAM_DRIVE_UUID filesystem=$STEAM_DRIVE_FSTYPE."
+      return 0
+    fi
+    printf 'Invalid selection.\n' >/dev/tty
+  done
 }
 
 validate_inputs() {
@@ -86,6 +147,7 @@ mount_steam_drive() {
 
 main() {
   require_normal_user
+  choose_steam_drive_uuid
   validate_inputs
   write_fstab_entry
   mount_steam_drive
