@@ -1,7 +1,6 @@
 // ────────────── Startup Applications ──────────────
 // https://github.com/YaLTeR/niri/wiki/Configuration:-Miscellaneous#spawn-sh-at-startup
 
-    spawn-at-startup "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1"
 
 // Noctalia v5
-spawn-at-startup "noctalia"
+spawn-at-startup "sh" "-c" "sleep 1; exec noctalia"
