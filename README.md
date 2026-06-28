@@ -59,10 +59,11 @@ TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
 `mount-steam-drive.sh` is a separate helper for mounting a Steam library drive at
 `/mnt/steam`.
 
-Default fstab entry:
+It lists available partitions and lets you choose which one to add. The fstab entry
+will look like this:
 
 ```fstab
-UUID=b633b102-ad34-443f-969f-b59ed480fa2d /mnt/steam ext4 defaults,noatime 0 2
+UUID=your-selected-uuid /mnt/steam ext4 defaults,noatime 0 2
 ```
 
 Run:
@@ -72,7 +73,7 @@ chmod +x mount-steam-drive.sh
 ./mount-steam-drive.sh
 ```
 
-Override the UUID if needed:
+Unattended run:
 
 ```bash
 STEAM_DRIVE_UUID=your-uuid ./mount-steam-drive.sh
