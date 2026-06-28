@@ -47,9 +47,10 @@ MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
 LSFG_VK_RELEASE_API="${LSFG_VK_RELEASE_API:-https://api.github.com/repos/PancakeTAS/lsfg-vk/releases/latest}"
 LSFG_VK_ASSET_REGEX="${LSFG_VK_ASSET_REGEX:-lsfg-vk-.*(linux|x86_64).*\\.tar\\.xz$}"
 POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
-SLEEK_GRUB_THEME_REPO="${SLEEK_GRUB_THEME_REPO:-https://github.com/sandesh236/sleek--themes}"
-SLEEK_GRUB_THEME_DIR="${SLEEK_GRUB_THEME_DIR:-$HOME/.cache/fedora-niri-setup/sleek--themes}"
-SLEEK_GRUB_THEME_SOURCE_SUBDIR="${SLEEK_GRUB_THEME_SOURCE_SUBDIR:-Sleek theme-dark}"
+SLEEK_GRUB_THEME_REPO="${SLEEK_GRUB_THEME_REPO:-$CONFIG_REPO_URL}"
+SLEEK_GRUB_THEME_BRANCH="${SLEEK_GRUB_THEME_BRANCH:-$CONFIG_REPO_BRANCH}"
+SLEEK_GRUB_THEME_DIR="${SLEEK_GRUB_THEME_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri-grub-theme}"
+SLEEK_GRUB_THEME_SOURCE_SUBDIR="${SLEEK_GRUB_THEME_SOURCE_SUBDIR:-grub/sleek-dark}"
 SLEEK_GRUB_THEME_TARGET="${SLEEK_GRUB_THEME_TARGET:-/boot/grub2/themes/sleek}"
 GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
 GRUB_CONFIG_FILE="${GRUB_CONFIG_FILE:-/etc/default/grub}"
@@ -238,7 +239,7 @@ resolve_target_user() {
   fi
 
   if [[ "$SLEEK_GRUB_THEME_DIR_WAS_SET" == "0" ]]; then
-    SLEEK_GRUB_THEME_DIR="$TARGET_HOME/.cache/fedora-niri-setup/sleek--themes"
+    SLEEK_GRUB_THEME_DIR="$TARGET_HOME/.cache/fedora-niri-setup/linux-niri-grub-theme"
   fi
 
   log "Target user: $TARGET_USER"
@@ -651,7 +652,7 @@ install_grub_theme() {
     return 0
   }
 
-  clone_or_update_git_repo "$SLEEK_GRUB_THEME_REPO" "$SLEEK_GRUB_THEME_DIR"
+  clone_or_update_git_repo "$SLEEK_GRUB_THEME_REPO" "$SLEEK_GRUB_THEME_DIR" "$SLEEK_GRUB_THEME_BRANCH"
 
   local source_dir
   if ! source_dir="$(find_sleek_dark_grub_theme_dir)"; then
