@@ -54,6 +54,30 @@ Unattended run:
 TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
 ```
 
+## Steam Drive
+
+`mount-steam-drive.sh` is a separate helper for mounting a Steam library drive at
+`/mnt/steam`.
+
+Default fstab entry:
+
+```fstab
+UUID=b633b102-ad34-443f-969f-b59ed480fa2d /mnt/steam ext4 defaults,noatime 0 2
+```
+
+Run:
+
+```bash
+chmod +x mount-steam-drive.sh
+./mount-steam-drive.sh
+```
+
+Override the UUID if needed:
+
+```bash
+STEAM_DRIVE_UUID=your-uuid ./mount-steam-drive.sh
+```
+
 ## Arch
 
 `arch-niri-setup.sh` is older and fuller, but Fedora is the current script being worked on.
