@@ -743,16 +743,16 @@ regenerate_grub_config() {
 verify_grub_theme_config() {
   [[ "$CONFIGURE_GRUB_THEME" == "1" ]] || return 0
 
-  if [[ ! -f "$SLEEK_GRUB_THEME_TARGET/theme.txt" ]]; then
+  if ! run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
     warn "GRUB theme file is missing after install: $SLEEK_GRUB_THEME_TARGET/theme.txt"
     return 0
   fi
 
-  if [[ -f "$GRUB_CONFIG_FILE" ]] && ! grep -Fq "GRUB_THEME=\"$SLEEK_GRUB_THEME_TARGET/theme.txt\"" "$GRUB_CONFIG_FILE"; then
+  if run_sudo test -f "$GRUB_CONFIG_FILE" && ! run_sudo grep -Fq "GRUB_THEME=\"$SLEEK_GRUB_THEME_TARGET/theme.txt\"" "$GRUB_CONFIG_FILE"; then
     warn "$GRUB_CONFIG_FILE does not contain the expected GRUB_THEME path."
   fi
 
-  if [[ -f "$GRUB_MKCONFIG_OUTPUT" ]] && ! grep -Fq "$(basename "$SLEEK_GRUB_THEME_TARGET")/theme.txt" "$GRUB_MKCONFIG_OUTPUT"; then
+  if run_sudo test -f "$GRUB_MKCONFIG_OUTPUT" && ! run_sudo grep -Fq "$(basename "$SLEEK_GRUB_THEME_TARGET")/theme.txt" "$GRUB_MKCONFIG_OUTPUT"; then
     warn "$GRUB_MKCONFIG_OUTPUT does not reference the Sleek theme. Re-run grub2-mkconfig manually and check GRUB errors."
   fi
 }
@@ -784,7 +784,7 @@ configure_plymouth_and_grub() {
   upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
   upsert_grub_default GRUB_GFXMODE "\"auto\""
   upsert_grub_default GRUB_TERMINAL_OUTPUT "\"gfxterm\""
-  if [[ "$CONFIGURE_GRUB_THEME" == "1" && -f "$SLEEK_GRUB_THEME_TARGET/theme.txt" ]]; then
+  if [[ "$CONFIGURE_GRUB_THEME" == "1" ]] && run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
     upsert_grub_default GRUB_THEME "\"$SLEEK_GRUB_THEME_TARGET/theme.txt\""
   fi
 
