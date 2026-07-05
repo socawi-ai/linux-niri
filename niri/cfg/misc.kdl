@@ -1,0 +1,29 @@
+workspace "Web"
+workspace "Dev"
+workspace "Games"
+
+    prefer-no-csd
+    screenshot-path "~/Screenshots/%Y-%m-%dT%H:%M:%S.png"
+
+    environment {
+        ELECTRON_OZONE_PLATFORM_HINT "auto"
+        QT_QPA_PLATFORM "wayland"
+        QT_QPA_PLATFORMTHEME "gtk3"
+        QT_WAYLAND_DISABLE_WINDOWDECORATION "1"
+        XDG_CURRENT_DESKTOP "niri"
+        XDG_SESSION_TYPE "wayland"
+}
+
+    cursor {
+        xcursor-theme "McMojave-cursors"
+        xcursor-size 16
+}
+
+    debug {
+        // Allows notification actions and window activation from Noctalia.
+        honor-xdg-activation-with-invalid-serial
+}
+
+    hotkey-overlay {
+       skip-at-startup
+}
