@@ -1,6 +1,0 @@
-// ────────────── Startup Applications ──────────────
-// https://github.com/YaLTeR/niri/wiki/Configuration:-Miscellaneous#spawn-sh-at-startup
-
-
-// Noctalia v5
-spawn-at-startup "sh" "-c" "sleep 1; exec noctalia"
