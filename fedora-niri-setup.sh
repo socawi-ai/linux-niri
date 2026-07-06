@@ -322,7 +322,7 @@ safe_rm_rf() {
       run_as_user rm -rf -- "$path"
       ;;
     /tmp/*|/var/tmp/*|/private/tmp/*|/private/var/tmp/*)
-      rm -rf -- "$path"
+      run_as_user rm -rf -- "$path"
       ;;
     *)
       die "Refusing to remove $path because it is outside the expected user or temporary directories."
@@ -884,7 +884,7 @@ install_mcmojave_cursors() {
 
   clone_or_update_git_repo "$MCMOJAVE_CURSORS_REPO" "$MCMOJAVE_CURSORS_DIR"
 
-  local theme_dir="$MCMOJAVE_CURSORS_DIR/dist"
+  local theme_dir="$MCMOJAVE_CURSORS_DIR/dist/$MCMOJAVE_CURSOR_THEME"
   if [[ ! -d "$theme_dir" || ! -f "$theme_dir/index.theme" ]]; then
     warn "No installable cursor theme found at $theme_dir; skipping McMojave cursor install."
     return 0
@@ -917,7 +917,7 @@ install_nautilus_open_any_terminal() {
 configure_nautilus_open_any_terminal() {
   [[ "$INSTALL_NAUTILUS_OPEN_ANY_TERMINAL" == "1" ]] || return 0
 
-  if run_as_user gsettings writable com.github.stunkymonkey.nautilus-open-any-terminal terminal >/dev/null 2>&1; then
+  if [[ "$(run_as_user gsettings writable com.github.stunkymonkey.nautilus-open-any-terminal terminal 2>/dev/null)" == "true" ]]; then
     run_as_user gsettings set com.github.stunkymonkey.nautilus-open-any-terminal terminal "$NAUTILUS_TERMINAL" || warn "Could not configure Nautilus Open Any Terminal."
     record_change "Configured Nautilus Open Any Terminal to use $NAUTILUS_TERMINAL."
   else
@@ -1414,15 +1414,15 @@ configure_gtk_dark_mode() {
   upsert_gtk_settings_file "$TARGET_HOME/.config/gtk-3.0/settings.ini"
   upsert_gtk_settings_file "$TARGET_HOME/.config/gtk-4.0/settings.ini"
 
-  if run_as_user gsettings writable org.gnome.desktop.interface color-scheme >/dev/null 2>&1; then
+  if [[ "$(run_as_user gsettings writable org.gnome.desktop.interface color-scheme 2>/dev/null)" == "true" ]]; then
     run_as_user gsettings set org.gnome.desktop.interface color-scheme "$GTK_COLOR_SCHEME" || warn "Could not set GNOME color-scheme."
   fi
 
-  if run_as_user gsettings writable org.gnome.desktop.interface gtk-theme >/dev/null 2>&1; then
+  if [[ "$(run_as_user gsettings writable org.gnome.desktop.interface gtk-theme 2>/dev/null)" == "true" ]]; then
     run_as_user gsettings set org.gnome.desktop.interface gtk-theme "$GTK_THEME_NAME" || warn "Could not set GNOME gtk-theme."
   fi
 
-  if run_as_user gsettings writable org.gnome.desktop.interface cursor-theme >/dev/null 2>&1; then
+  if [[ "$(run_as_user gsettings writable org.gnome.desktop.interface cursor-theme 2>/dev/null)" == "true" ]]; then
     run_as_user gsettings set org.gnome.desktop.interface cursor-theme "$GTK_CURSOR_THEME" || warn "Could not set GNOME cursor-theme."
   fi
 
