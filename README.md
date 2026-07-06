@@ -1,17 +1,15 @@
 # Linux Niri Setup
 
-Personal setup scripts for a Niri desktop.
+Personal setup script for a Niri desktop on Fedora.
 
 This is in testing. Read the script before running it, and only run it on a system you
 are prepared to repair.
 
-Run scripts as your normal user, not with `sudo`. The scripts ask for sudo when needed.
+Run as your normal user, not with `sudo`. The script asks for sudo when needed.
 
 ## Fedora
 
-`fedora-niri-setup.sh` is the current focus.
-
-It installs and configures:
+`fedora-niri-setup.sh` installs and configures:
 
 - Niri
 - Noctalia v5
@@ -55,30 +53,12 @@ Unattended run:
 TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
 ```
 
-## Arch
-
-`arch-niri-setup.sh` is older and fuller, but Fedora is the current script being worked on.
-
-Run:
-
-```bash
-chmod +x arch-niri-setup.sh
-./arch-niri-setup.sh
-```
-
 ## Backups
 
-The scripts back up most replaced files.
-
-Fedora:
+The script backs up most replaced files.
 
 - user backups: `~/.local/share/fedora-niri-setup/backups/`
 - system backups: `/var/backups/fedora-niri-setup/`
-
-Arch:
-
-- user backups: `~/.local/share/arch-niri-setup/backups/`
-- system backups: `/var/backups/arch-niri-setup/`
 
 Each run also writes a timestamped log file in the user's home directory.
 
