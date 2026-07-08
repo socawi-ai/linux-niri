@@ -13,6 +13,7 @@ binds {
     Mod+CTRL+Return hotkey-overlay-title="Open App Launcher: noctalia launcher" { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
     Mod+B hotkey-overlay-title="Open Browser: firefox" { spawn "firefox"; }
     Mod+S hotkey-overlay-title="Open Steam" { spawn "steam"; }
+    Mod+G hotkey-overlay-title="Open Godot Engine" { spawn "godot"; }
     Mod+P hotkey-overlay-title="Open Protonmail" { spawn "flatpak" "run" "me.proton.Mail"; }
     Mod+ALT+L hotkey-overlay-title="Lock Screen: noctalia lock" {spawn-sh "noctalia msg session lock";}
 
