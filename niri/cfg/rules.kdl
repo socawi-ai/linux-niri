@@ -6,7 +6,6 @@ window-rule {
 
 window-rule {
     match app-id=r"^firefox|^org\.mozilla\.firefox|^firefoxdeveloperedition"
-    open-on-workspace "Web"
     default-column-width { proportion 0.5; }
 }
 
