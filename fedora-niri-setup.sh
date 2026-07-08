@@ -52,13 +52,14 @@ SLEEK_GRUB_THEME_BRANCH="${SLEEK_GRUB_THEME_BRANCH:-$CONFIG_REPO_BRANCH}"
 SLEEK_GRUB_THEME_DIR="${SLEEK_GRUB_THEME_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri-grub-theme}"
 SLEEK_GRUB_THEME_SOURCE_SUBDIR="${SLEEK_GRUB_THEME_SOURCE_SUBDIR:-grub/sleek-dark}"
 SLEEK_GRUB_THEME_TARGET="${SLEEK_GRUB_THEME_TARGET:-/boot/grub2/themes/sleek}"
+GRUB_GFXMODE="${GRUB_GFXMODE:-3440x1440,2560x1440,1920x1080,auto}"
 GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
 GRUB_CONFIG_FILE="${GRUB_CONFIG_FILE:-/etc/default/grub}"
 GRUB_MKCONFIG_OUTPUT="${GRUB_MKCONFIG_OUTPUT:-/boot/grub2/grub.cfg}"
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
 NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-13.png}"
-NOCTALIA_WALLPAPER_MONITORS="${NOCTALIA_WALLPAPER_MONITORS:-DP-3}"
+NOCTALIA_WALLPAPER_MONITORS="${NOCTALIA_WALLPAPER_MONITORS:-}"
 GREETD_USER="${GREETD_USER:-greeter}"
 NOCTALIA_GREETER_SESSION_BIN="${NOCTALIA_GREETER_SESSION_BIN:-}"
 
@@ -589,11 +590,6 @@ install_steam() {
 
 set_systemd_user_service() {
   local service="$1"
-
-  if [[ "$ENABLE_POLARIS_LINGER" == "1" ]]; then
-    run_sudo loginctl enable-linger "$TARGET_USER" || warn "Could not enable linger for $TARGET_USER."
-  fi
-
   local user_id
   user_id="$(id -u "$TARGET_USER")"
   if [[ -d "/run/user/$user_id" ]]; then
@@ -617,6 +613,10 @@ configure_polaris_autostart() {
     log "Polaris autostart is disabled."
     return 0
   }
+
+  if [[ "$ENABLE_POLARIS_LINGER" == "1" ]]; then
+    run_sudo loginctl enable-linger "$TARGET_USER" || warn "Could not enable linger for $TARGET_USER."
+  fi
 
   if set_systemd_user_service polaris.service; then
     record_change "Enabled Polaris user service autostart."
@@ -791,7 +791,7 @@ configure_plymouth_and_grub() {
 
   upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
   upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
-  upsert_grub_default GRUB_GFXMODE "\"3440x1440,2560x1440,1920x1080,auto\""
+  upsert_grub_default GRUB_GFXMODE "\"$GRUB_GFXMODE\""
   upsert_grub_default GRUB_TERMINAL_OUTPUT "\"gfxterm\""
   if [[ "$CONFIGURE_GRUB_THEME" == "1" ]] && run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
     upsert_grub_default GRUB_THEME "\"$SLEEK_GRUB_THEME_TARGET/theme.txt\""
@@ -1072,32 +1072,7 @@ clone_or_update_config_repo() {
     return 0
   fi
 
-  run_as_user mkdir -p "$(dirname "$CONFIG_REPO_DIR")"
-
-  if [[ -d "$CONFIG_REPO_DIR/.git" ]]; then
-    local current_url
-    current_url="$(run_as_user git -C "$CONFIG_REPO_DIR" config --get remote.origin.url || true)"
-    if [[ "$current_url" != "$CONFIG_REPO_URL" ]]; then
-      warn "$CONFIG_REPO_DIR is a git repository with origin $current_url, not $CONFIG_REPO_URL. Backing it up and cloning fresh."
-      backup_user_path "$CONFIG_REPO_DIR"
-      safe_rm_rf "$CONFIG_REPO_DIR"
-      run_as_user git clone --branch "$CONFIG_REPO_BRANCH" "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
-    else
-      log "Updating config repository at $CONFIG_REPO_DIR."
-      run_as_user git -C "$CONFIG_REPO_DIR" fetch --prune
-      run_as_user git -C "$CONFIG_REPO_DIR" checkout -f "$CONFIG_REPO_BRANCH"
-      run_as_user git -C "$CONFIG_REPO_DIR" reset --hard "origin/$CONFIG_REPO_BRANCH"
-    fi
-  elif [[ -e "$CONFIG_REPO_DIR" ]]; then
-    warn "$CONFIG_REPO_DIR exists but is not a git repository. Backing it up and cloning fresh."
-    backup_user_path "$CONFIG_REPO_DIR"
-    safe_rm_rf "$CONFIG_REPO_DIR"
-    run_as_user git clone --branch "$CONFIG_REPO_BRANCH" "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
-  else
-    log "Cloning config repository to $CONFIG_REPO_DIR."
-    run_as_user git clone --branch "$CONFIG_REPO_BRANCH" "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR"
-  fi
-
+  clone_or_update_git_repo "$CONFIG_REPO_URL" "$CONFIG_REPO_DIR" "$CONFIG_REPO_BRANCH"
   CONFIG_SOURCE_DIR="$CONFIG_REPO_DIR"
   record_change "Cloned or updated config repository $CONFIG_REPO_URL branch $CONFIG_REPO_BRANCH."
 }
@@ -1265,51 +1240,6 @@ EOF
   fi
 
   record_change "Configured Noctalia wallpaper settings in $config_file."
-}
-
-ensure_niri_autostarts_noctalia() {
-  local niri_dir="$TARGET_HOME/.config/niri"
-  local autostart_file="$niri_dir/cfg/autostart.kdl"
-  local fallback_file="$niri_dir/config.kdl"
-  local target_file=""
-
-  if [[ -f "$autostart_file" ]]; then
-    target_file="$autostart_file"
-  elif [[ -f "$fallback_file" ]]; then
-    target_file="$fallback_file"
-    warn "No $autostart_file found; adding Noctalia autostart to $fallback_file instead."
-  else
-    warn "No Niri config file found; could not add Noctalia autostart."
-    return 0
-  fi
-
-  if grep -Fq 'spawn-at-startup "sh" "-c" "sleep 3; exec noctalia"' "$target_file"; then
-    log "Niri already autostarts Noctalia in $target_file."
-    return 0
-  fi
-
-  backup_user_path "$target_file"
-  local tmp
-  tmp="$(mktemp)"
-  grep -Ev \
-    '^[[:space:]]*spawn-at-startup[[:space:]]+.*(noctalia|noctalia-shell|noctalia-qs|"qs"[[:space:]]+"-c"[[:space:]]+"noctalia|quickshell.*noctalia)' \
-    "$target_file" >"$tmp"
-
-  cat >>"$tmp" <<'EOF'
-
-// Noctalia v5
-spawn-at-startup "sh" "-c" "sleep 3; exec noctalia"
-EOF
-
-  chmod 0644 "$tmp"
-  run_as_user install -m 0644 "$tmp" "$target_file"
-  rm -f "$tmp"
-
-  if have_command niri; then
-    run_as_user niri validate -c "$niri_dir/config.kdl" >/dev/null 2>&1 || warn "Niri config validation failed after adding Noctalia autostart."
-  fi
-
-  record_change "Configured Niri to autostart Noctalia v5."
 }
 
 configure_user_environment() {
@@ -1556,7 +1486,6 @@ main() {
   clone_or_update_config_repo
   verify_config_source
   install_user_configs
-  ensure_niri_autostarts_noctalia
 
   section "User settings"
   configure_user_environment
