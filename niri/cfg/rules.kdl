@@ -30,7 +30,7 @@ window-rule {
 
 // ─── Godot Engine ───
 window-rule {
-    match app-id=r"^(org\.godotengine\.Godot|Godot_Engine)$"
+    match app-id="Godot"
     open-on-workspace "Dev"
     opacity 1.0
     background-effect {
@@ -39,12 +39,12 @@ window-rule {
 }
 
 window-rule {
-    match app-id=r"^(org\.godotengine\.Godot|Godot_Engine)$" title=r"^Godot Engine - Project Manager"
+    match app-id="Godot" title=r"^Godot Engine - Project Manager"
     open-floating true
 }
 
 window-rule {
-    match app-id=r"^(org\.godotengine\.Godot|Godot_Engine)$"
+    match app-id="Godot"
     exclude title=r"Godot Engine"
     open-floating true
 }
