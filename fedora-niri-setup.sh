@@ -81,19 +81,25 @@ STEP_COUNT=0
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   COLOR_RESET=$'\033[0m'
+  COLOR_BOLD=$'\033[1m'
   COLOR_BLUE=$'\033[1;34m'
+  COLOR_CYAN=$'\033[1;36m'
   COLOR_GREEN=$'\033[1;32m'
   COLOR_YELLOW=$'\033[1;33m'
   COLOR_RED=$'\033[1;31m'
   COLOR_DIM=$'\033[2m'
 else
   COLOR_RESET=""
+  COLOR_BOLD=""
   COLOR_BLUE=""
+  COLOR_CYAN=""
   COLOR_GREEN=""
   COLOR_YELLOW=""
   COLOR_RED=""
   COLOR_DIM=""
 fi
+
+TOTAL_SECTIONS=9
 
 declare -a CHANGES=()
 declare -a WARNINGS=()
@@ -104,23 +110,35 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 trap 'die "Setup failed on or near line $LINENO. Review $LOG_FILE, fix the reported problem, then re-run the script."' ERR
 
+print_banner() {
+  printf '\n'
+  printf '%s  ╭──────────────────────────────────────────────────────╮%s\n' "$COLOR_BLUE" "$COLOR_RESET"
+  printf '%s  │                                                      │%s\n' "$COLOR_BLUE" "$COLOR_RESET"
+  printf '%s  │  %sFedora Niri Setup%s                                   │%s\n' "$COLOR_BLUE" "$COLOR_BOLD" "$COLOR_BLUE" "$COLOR_RESET"
+  printf '%s  │  %sNiri desktop installer for Fedora Linux%s             │%s\n' "$COLOR_BLUE" "$COLOR_DIM" "$COLOR_BLUE" "$COLOR_RESET"
+  printf '%s  │                                                      │%s\n' "$COLOR_BLUE" "$COLOR_RESET"
+  printf '%s  ╰──────────────────────────────────────────────────────╯%s\n' "$COLOR_BLUE" "$COLOR_RESET"
+  printf '\n'
+}
+
 section() {
   STEP_COUNT=$((STEP_COUNT + 1))
-  printf '\n%s+--[%02d] %s%s\n' "$COLOR_BLUE" "$STEP_COUNT" "$*" "$COLOR_RESET"
-  printf '%s|%s\n' "$COLOR_DIM" "$COLOR_RESET"
+  printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_BLUE" "$COLOR_RESET"
+  printf '%s  [ %02d / %02d ]  %s%s\n' "$COLOR_BLUE" "$STEP_COUNT" "$TOTAL_SECTIONS" "$*" "$COLOR_RESET"
+  printf '%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_BLUE" "$COLOR_RESET"
 }
 
 log() {
-  printf '%s[%s]%s %s\n' "$COLOR_GREEN" "$(date '+%H:%M:%S')" "$COLOR_RESET" "$*"
+  printf '  %s✓%s  %s\n' "$COLOR_GREEN" "$COLOR_RESET" "$*"
 }
 
 warn() {
   WARNINGS+=("$*")
-  printf '%s[%s] WARNING:%s %s\n' "$COLOR_YELLOW" "$(date '+%H:%M:%S')" "$COLOR_RESET" "$*" >&2
+  printf '  %s⚠%s  %s\n' "$COLOR_YELLOW" "$COLOR_RESET" "$*" >&2
 }
 
 die() {
-  printf '%s[%s] ERROR:%s %s\n' "$COLOR_RED" "$(date '+%H:%M:%S')" "$COLOR_RESET" "$*" >&2
+  printf '\n  %s✗  ERROR:%s %s\n\n' "$COLOR_RED" "$COLOR_RESET" "$*" >&2
   exit 1
 }
 
@@ -1399,28 +1417,33 @@ EOF
 print_summary() {
   local item
 
-  printf '\nSetup summary\n'
-  printf '=============\n'
-  printf 'Log file: %s\n' "$LOG_FILE"
-  printf 'User backups: %s\n' "$USER_BACKUP_ROOT"
-  printf 'System backups: %s\n' "$SYSTEM_BACKUP_ROOT"
+  printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_GREEN" "$COLOR_RESET"
+  printf '%s  Setup complete%s\n' "$COLOR_GREEN" "$COLOR_RESET"
+  printf '%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_GREEN" "$COLOR_RESET"
+  printf '\n'
+  printf '  Log:            %s\n' "$LOG_FILE"
+  printf '  User backups:   %s\n' "$USER_BACKUP_ROOT"
+  printf '  System backups: %s\n' "$SYSTEM_BACKUP_ROOT"
 
   if ((${#CHANGES[@]})); then
-    printf '\nChanges made or verified:\n'
+    printf '\n  %sChanges:%s\n' "$COLOR_GREEN" "$COLOR_RESET"
     for item in "${CHANGES[@]}"; do
-      printf ' - %s\n' "$item"
+      printf '  %s✓%s  %s\n' "$COLOR_GREEN" "$COLOR_RESET" "$item"
     done
   fi
 
   if ((${#WARNINGS[@]})); then
-    printf '\nWarnings:\n'
+    printf '\n  %sWarnings:%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
     for item in "${WARNINGS[@]}"; do
-      printf ' - %s\n' "$item"
+      printf '  %s⚠%s  %s\n' "$COLOR_YELLOW" "$COLOR_RESET" "$item"
     done
   fi
+
+  printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n' "$COLOR_GREEN" "$COLOR_RESET"
 }
 
 main() {
+  print_banner
   section "Fedora Niri setup"
   require_fedora
   resolve_target_user
