@@ -899,7 +899,7 @@ install_mcmojave_cursors() {
 
   clone_or_update_git_repo "$MCMOJAVE_CURSORS_REPO" "$MCMOJAVE_CURSORS_DIR"
 
-  local theme_dir="$MCMOJAVE_CURSORS_DIR/dist/$MCMOJAVE_CURSOR_THEME"
+  local theme_dir="$MCMOJAVE_CURSORS_DIR/dist"
   if [[ ! -d "$theme_dir" || ! -f "$theme_dir/index.theme" ]]; then
     warn "No installable cursor theme found at $theme_dir; skipping McMojave cursor install."
     return 0
