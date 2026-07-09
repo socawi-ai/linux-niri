@@ -517,8 +517,6 @@ install_fedora_packages() {
     xdg-desktop-portal
     xdg-desktop-portal-gnome
     xdg-desktop-portal-gtk
-    gnome-keyring
-    seahorse
     dbus
     dconf
     libsecret
