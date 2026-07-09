@@ -4,10 +4,6 @@ window-rule {
     default-column-width { proportion 0.5; }
 }
 
-window-rule {
-    match app-id=r"^firefox|^org\.mozilla\.firefox|^firefoxdeveloperedition"
-    default-column-width { proportion 0.5; }
-}
 
 window-rule {
     match app-id="me.proton.Mail"
