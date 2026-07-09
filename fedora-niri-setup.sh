@@ -28,7 +28,6 @@ INSTALL_STEAM="${INSTALL_STEAM:-1}"
 INSTALL_VSCODE="${INSTALL_VSCODE:-1}"
 INSTALL_MCMOJAVE_CURSORS="${INSTALL_MCMOJAVE_CURSORS:-1}"
 INSTALL_NAUTILUS_OPEN_ANY_TERMINAL="${INSTALL_NAUTILUS_OPEN_ANY_TERMINAL:-1}"
-INSTALL_LSFG_VK="${INSTALL_LSFG_VK:-1}"
 INSTALL_POLARIS="${INSTALL_POLARIS:-1}"
 SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
 ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
@@ -44,8 +43,6 @@ NAUTILUS_TERMINAL="${NAUTILUS_TERMINAL:-alacritty}"
 MCMOJAVE_CURSORS_REPO="${MCMOJAVE_CURSORS_REPO:-https://github.com/vinceliuice/McMojave-cursors}"
 MCMOJAVE_CURSORS_DIR="${MCMOJAVE_CURSORS_DIR:-$HOME/.cache/fedora-niri-setup/McMojave-cursors}"
 MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
-LSFG_VK_RELEASE_API="${LSFG_VK_RELEASE_API:-https://api.github.com/repos/PancakeTAS/lsfg-vk/releases/latest}"
-LSFG_VK_ASSET_REGEX="${LSFG_VK_ASSET_REGEX:-lsfg-vk-.*x86_64\\.rpm$}"
 POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
 SLEEK_GRUB_THEME_REPO="${SLEEK_GRUB_THEME_REPO:-$CONFIG_REPO_URL}"
 SLEEK_GRUB_THEME_BRANCH="${SLEEK_GRUB_THEME_BRANCH:-$CONFIG_REPO_BRANCH}"
@@ -945,46 +942,6 @@ download_as_user() {
   run_as_user curl -fL "$url" -o "$dest"
 }
 
-install_lsfg_vk() {
-  [[ "$INSTALL_LSFG_VK" == "1" ]] || {
-    log "LSFG-VK installation is disabled."
-    return 0
-  }
-
-  local asset_url
-  if ! asset_url="$(github_latest_asset_url "$LSFG_VK_RELEASE_API" "$LSFG_VK_ASSET_REGEX")" || [[ -z "$asset_url" ]]; then
-    warn "Could not find a matching LSFG-VK release asset."
-    return 0
-  fi
-
-  local downloads_dir="$TARGET_HOME/.cache/fedora-niri-setup/downloads"
-  local package_path
-  package_path="$downloads_dir/$(basename "$asset_url")"
-
-  log "Downloading LSFG-VK from $asset_url."
-  if ! download_as_user "$asset_url" "$package_path"; then
-    warn "Could not download LSFG-VK."
-    return 0
-  fi
-
-  case "$package_path" in
-    *.rpm)
-      if dnf_install_optional "$package_path"; then
-        record_change "Installed LSFG-VK from latest GitHub release RPM."
-      else
-        warn "Could not install LSFG-VK RPM."
-      fi
-      ;;
-    *)
-      warn "Downloaded LSFG-VK asset is not an RPM: $package_path"
-      ;;
-  esac
-
-  if ! package_installed lsfg-vk; then
-    warn "LSFG-VK package is not installed after the GitHub release step."
-    return 0
-  fi
-}
 
 install_polaris() {
   [[ "$INSTALL_POLARIS" == "1" ]] || {
@@ -1035,7 +992,6 @@ install_default_apps() {
   install_steam
   install_mcmojave_cursors
   install_nautilus_open_any_terminal
-  install_lsfg_vk
   install_polaris
 }
 
