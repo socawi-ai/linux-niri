@@ -2,8 +2,16 @@
 set -Eeuo pipefail
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# rEFInd UEFI bootloader migration — standalone script
+# rEFInd UEFI boot manager — standalone script
 # ═══════════════════════════════════════════════════════════════════════════════
+#
+# Installs rEFInd as the primary UEFI boot manager. This does NOT replace
+# GRUB or boot Linux kernels directly: GRUB stays installed exactly as it
+# is, and rEFInd simply chainloads into it — its normal boot-loader auto-scan
+# finds the existing EFI/fedora/grubx64.efi and offers it as a menu entry.
+# GRUB itself is configured for an instant, silent boot (GRUB_TIMEOUT=0,
+# hidden menu), so in practice: firmware -> rEFInd -> GRUB -> Linux, with no
+# visible menus unless you interact with rEFInd's own timeout.
 #
 # Split out of fedora-niri-setup.sh so bootloader changes can be run, tested,
 # and re-run independently of the desktop setup.
@@ -16,38 +24,19 @@ set -Eeuo pipefail
 # Secure Boot key. If SB is enabled, this script runs refind-install with
 # --localkeys (self-signs with a freshly generated local key). Because the
 # script runs non-interactively, you must manually enroll that key as a MOK
-# afterwards (exact command is printed in the summary). GRUB is NOT removed
-# automatically until Secure Boot is resolved and rEFInd has been verified
-# to boot.
-#
-# Theme: installs a visual theme from a git repo following the standard
-# rEFInd theme layout (banner/, icons/, selection/, theme.conf). Defaults to
-# https://github.com/NilsPvR/rEFInd-nils. Set INSTALL_REFIND_THEME=0 to skip.
+# afterwards (exact command is printed in the summary).
 #
 # Usage:
-#   ./refind-migrate.sh                                # interactive
-#   ASSUME_YES=1 ./refind-migrate.sh                    # non-interactive
-#   REFIND_REMOVE_GRUB=0 ./refind-migrate.sh            # install only, keep GRUB
-#   ASSUME_YES=1 REFIND_REMOVE_GRUB=1 ./refind-migrate.sh   # full unattended migration
-#   INSTALL_REFIND_THEME=0 ./refind-migrate.sh          # skip the visual theme
+#   ./refind-migrate.sh                # interactive
+#   ASSUME_YES=1 ./refind-migrate.sh    # non-interactive
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ASSUME_YES="${ASSUME_YES:-0}"
 DNF_SKIP_UNAVAILABLE="${DNF_SKIP_UNAVAILABLE:-1}"
 
-REFIND_REMOVE_GRUB="${REFIND_REMOVE_GRUB:-1}"
 REFIND_TIMEOUT="${REFIND_TIMEOUT:-5}"
 REFIND_ENTRY_LABEL="${REFIND_ENTRY_LABEL:-Fedora Linux}"
 REFIND_ESP_SUBDIR="${REFIND_ESP_SUBDIR:-EFI/refind}"
-REFIND_RECOVERY_DIR="${REFIND_RECOVERY_DIR:-/var/backups/bootloader-migration}"
-
-# rEFInd visual theme. Set INSTALL_REFIND_THEME=0 to skip (default rEFInd
-# look). Any git repo following the standard rEFInd theme layout
-# (banner/, icons/, selection/, theme.conf) works here.
-INSTALL_REFIND_THEME="${INSTALL_REFIND_THEME:-1}"
-REFIND_THEME_REPO="${REFIND_THEME_REPO:-https://github.com/NilsPvR/rEFInd-nils}"
-REFIND_THEME_NAME="${REFIND_THEME_NAME:-rEFInd-nils}"
-REFIND_THEME_DIR="${REFIND_THEME_DIR:-$HOME/.cache/fedora-niri-setup/refind-theme}"
 
 # Runtime state — populated by preflight functions; not user-configurable.
 _REFIND_ESP=""
@@ -57,7 +46,7 @@ _REFIND_ARCH=""
 _REFIND_EFI_NAME=""
 _REFIND_SECURE_BOOT=""
 _REFIND_BOOT_NUM=""
-_REFIND_THEME_INSTALLED=""
+_GRUB_BOOT_NUM=""
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_FILE:-$HOME/refind-migrate-$TIMESTAMP.log}"
@@ -394,37 +383,8 @@ refind_check_secure_boot() {
     warn "a local signing key and self-signs the rEFInd binaries with it."
     warn "Because this script runs refind-install non-interactively (--yes), the MOK"
     warn "enrollment prompt is skipped — you must enroll the key yourself after this run"
-    warn "finishes (exact command is printed in the summary below). Until that key is"
-    warn "enrolled and the system has rebooted successfully with rEFInd, GRUB will NOT"
-    warn "be removed automatically."
+    warn "finishes (exact command is printed in the summary below)."
   fi
-}
-
-refind_resolve_cmdline() {
-  local cmdline=""
-
-  if [[ -s /etc/kernel/cmdline ]]; then
-    cmdline="$(tr -s '[:space:]' ' ' </etc/kernel/cmdline | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    [[ -n "$cmdline" ]] && printf '%s\n' "$cmdline" && return 0
-  fi
-
-  local bls_dir
-  for bls_dir in /boot/loader/entries /boot/efi/loader/entries /efi/loader/entries; do
-    [[ -d "$bls_dir" ]] || continue
-    local bls_file
-    bls_file="$(find "$bls_dir" -maxdepth 1 -name '*.conf' ! -name '*rescue*' -print 2>/dev/null \
-                | sort -rV | head -1 || true)"
-    if [[ -n "$bls_file" ]]; then
-      cmdline="$(awk '/^options[[:space:]]/ { sub(/^options[[:space:]]+/,""); print; exit }' "$bls_file" \
-                 | tr -s ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-      [[ -n "$cmdline" ]] && printf '%s\n' "$cmdline" && return 0
-    fi
-  done
-
-  cmdline="$(sed -E 's/(^|[[:space:]])BOOT_IMAGE=[^[:space:]]*/\1/g' /proc/cmdline \
-             | tr -s ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  [[ -n "$cmdline" ]] || die "Could not resolve a non-empty kernel command line from any source."
-  printf '%s\n' "$cmdline"
 }
 
 refind_install_package() {
@@ -436,10 +396,10 @@ refind_install_package() {
     die "refind-install not found after installing rEFInd (expected from rEFInd-tools)."
 
   # refind-install auto-detects the ESP, copies the EFI binary, icons, and
-  # filesystem drivers, writes a starter refind.conf and /boot/refind_linux.conf,
-  # and registers (and de-duplicates) the UEFI NVRAM entry itself — including
-  # placing it first in BootOrder. We overlay our own refind.conf and
-  # refind_linux.conf afterwards for consistent, predictable settings.
+  # filesystem drivers, and registers (and de-duplicates) the UEFI NVRAM
+  # entry itself — including placing it first in BootOrder. We overlay our
+  # own refind.conf afterwards for consistent, predictable settings (no
+  # direct kernel scanning — GRUB is chainloaded instead, see below).
   local install_args=(--yes)
   if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
     install_args+=(--localkeys)
@@ -464,57 +424,6 @@ refind_install_package() {
   fi
 }
 
-refind_install_theme() {
-  [[ "$INSTALL_REFIND_THEME" == "1" ]] || {
-    log "rEFInd theme installation is disabled (INSTALL_REFIND_THEME=0)."
-    return 0
-  }
-
-  have_command git || dnf_install_best_effort git
-  if ! have_command git; then
-    warn "git is not available; skipping rEFInd theme install."
-    return 0
-  fi
-
-  log "Fetching rEFInd theme from ${REFIND_THEME_REPO}."
-  if [[ -d "${REFIND_THEME_DIR}/.git" ]]; then
-    git -C "$REFIND_THEME_DIR" pull --ff-only --quiet || \
-      warn "Could not update theme repo at ${REFIND_THEME_DIR}; using cached copy."
-  else
-    rm -rf "$REFIND_THEME_DIR"
-    if ! git clone --quiet "$REFIND_THEME_REPO" "$REFIND_THEME_DIR"; then
-      warn "Could not clone ${REFIND_THEME_REPO}; continuing without a theme."
-      return 0
-    fi
-  fi
-
-  [[ -f "${REFIND_THEME_DIR}/theme.conf" ]] || {
-    warn "${REFIND_THEME_DIR} has no theme.conf; not a valid rEFInd theme, skipping."
-    return 0
-  }
-
-  local theme_dest="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}/themes/${REFIND_THEME_NAME}"
-  backup_system_path "$theme_dest"
-  run_sudo rm -rf "$theme_dest"
-  run_sudo install -d -m 0755 "$(dirname "$theme_dest")"
-
-  local tmp_theme; tmp_theme="$(mktemp -d)"
-  cp -r "${REFIND_THEME_DIR}/." "${tmp_theme}/"
-  rm -rf "${tmp_theme}/.git"
-  # -r, not -a: the ESP is vfat, which has no concept of Unix ownership —
-  # cp -a always fails trying to chown there, even as root.
-  run_sudo mkdir -p "$theme_dest"
-  run_sudo cp -r "${tmp_theme}/." "${theme_dest}/"
-  rm -rf "$tmp_theme"
-
-  run_sudo test -f "${theme_dest}/theme.conf" || \
-    die "Theme copy to ${theme_dest} failed — theme.conf missing after copy."
-
-  _REFIND_THEME_INSTALLED=1
-  log "Installed rEFInd theme '${REFIND_THEME_NAME}' to ${theme_dest}."
-  record_change "Installed rEFInd theme '${REFIND_THEME_NAME}' from ${REFIND_THEME_REPO}."
-}
-
 refind_write_conf() {
   local esp_dir="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}"
   local conf_dest="${esp_dir}/refind.conf"
@@ -528,23 +437,12 @@ refind_write_conf() {
 
 timeout ${REFIND_TIMEOUT}
 
-# Auto-detect all Linux kernels on all readable volumes.
-scan_all_linux_kernels true
+# Don't scan for or directly boot Linux kernels — GRUB (kept, chainloaded)
+# owns that job. rEFInd's normal boot-loader auto-scan still finds and
+# offers the existing GRUB EFI binary in EFI/fedora/ as a menu entry.
+scan_all_linux_kernels false
 
-# Show each kernel as a separate entry (not folded by version).
-fold_linux_kernels false
-
-# Recognise kernels stored under these extra name patterns.
-extra_kernel_version_strings linux,linux-lts,linux-hardened,linux-zen
-
-# Skip volumes labelled as recovery/diagnostic environments.
-dont_scan_volumes "Recovery,RECOVERY,WRE"
-
-# Hide rescue kernels from the boot menu.
-dont_scan_files rescue,fallback
-
-# Boot options come from /boot/refind_linux.conf next to each kernel.
-# NVRAM is managed by refind-install/efibootmgr, not by rEFInd itself.
+# NVRAM is managed externally via efibootmgr, not by rEFInd itself.
 use_nvram false
 
 # Default to the most recently booted entry.
@@ -554,41 +452,9 @@ default_selection lastbooted
 resolution auto
 EOF
 
-  if [[ "$_REFIND_THEME_INSTALLED" == "1" ]]; then
-    printf '\n# Theme: %s (%s)\ninclude themes/%s/theme.conf\n' \
-      "$REFIND_THEME_NAME" "$REFIND_THEME_REPO" "$REFIND_THEME_NAME" >>"$tmp"
-  fi
-
   run_sudo install -m 0644 "$tmp" "$conf_dest"
   rm -f "$tmp"
   log "Wrote rEFInd config: $conf_dest."
-}
-
-refind_write_linux_conf() {
-  local cmdline
-  cmdline="$(refind_resolve_cmdline)"
-  local cmdline_verbose
-  cmdline_verbose="$(printf '%s' "$cmdline" | sed 's/ quiet\b//g; s/ splash\b//g; s/ rhgb\b//g' | tr -s ' ')"
-
-  local conf_dest="/boot/refind_linux.conf"
-  backup_system_path "$conf_dest"
-
-  local tmp; tmp="$(mktemp)"
-  cat >"$tmp" <<EOF
-# /boot/refind_linux.conf — per-kernel rEFInd boot options
-# Written by refind-migrate.sh on ${TIMESTAMP}.
-# Edit this file to customise kernel parameters.
-# Format:  "Menu label"  "kernel options"
-
-"Boot normally"            "${cmdline}"
-"Boot verbose"             "${cmdline_verbose} systemd.show_status=1"
-"Boot to single-user"      "${cmdline} single"
-"Boot to emergency shell"  "${cmdline} systemd.unit=emergency.target"
-EOF
-  run_sudo install -m 0644 "$tmp" "$conf_dest"
-  rm -f "$tmp"
-  log "Wrote /boot/refind_linux.conf."
-  log "Kernel cmdline: ${cmdline}."
 }
 
 refind_locate_nvram_entry() {
@@ -635,6 +501,29 @@ refind_locate_nvram_entry() {
   record_change "rEFInd registered as Boot${_REFIND_BOOT_NUM}, first in BootOrder."
 }
 
+refind_locate_grub_entry() {
+  # GRUB's own NVRAM entry (created originally by Anaconda/grub2-efi) is left
+  # completely alone — refind-install only adds/reorders its own entry. Find
+  # it so we can point at it as a concrete fallback in the summary.
+  _GRUB_BOOT_NUM=""
+  local boot_entry boot_num
+  while IFS= read -r boot_entry; do
+    [[ "$boot_entry" =~ ^Boot([0-9A-Fa-f]{4}) ]] || continue
+    boot_num="${BASH_REMATCH[1]}"
+    [[ "${boot_num^^}" == "${_REFIND_BOOT_NUM^^}" ]] && continue
+    if echo "$boot_entry" | grep -qiE '\\EFI\\fedora\\'; then
+      _GRUB_BOOT_NUM="$boot_num"
+      break
+    fi
+  done < <(run_sudo efibootmgr -v 2>/dev/null || true)
+
+  if [[ -n "$_GRUB_BOOT_NUM" ]]; then
+    log "Existing GRUB NVRAM entry kept as fallback: Boot${_GRUB_BOOT_NUM}."
+  else
+    warn "No separate GRUB NVRAM entry found — firmware boot menu will only offer rEFInd."
+  fi
+}
+
 refind_validate() {
   local errors=0
   log "Validating rEFInd installation…"
@@ -655,13 +544,6 @@ refind_validate() {
     errors=$(( errors + 1 ))
   fi
 
-  if [[ -f /boot/refind_linux.conf ]]; then
-    log "  [✓] /boot/refind_linux.conf present"
-  else
-    warn "  [✗] /boot/refind_linux.conf missing"
-    errors=$(( errors + 1 ))
-  fi
-
   if [[ -n "$_REFIND_BOOT_NUM" ]] && \
      run_sudo efibootmgr 2>/dev/null | grep -q "Boot${_REFIND_BOOT_NUM}"; then
     log "  [✓] NVRAM entry Boot${_REFIND_BOOT_NUM} present"
@@ -679,188 +561,102 @@ refind_validate() {
     errors=$(( errors + 1 ))
   fi
 
-  local kcount=0
-  kcount="$(find /boot -maxdepth 1 -name 'vmlinuz-*' ! -name '*rescue*' -print 2>/dev/null | wc -l || echo 0)"
-  kcount="${kcount//[[:space:]]/}"
-  if (( kcount > 0 )); then
-    log "  [✓] Found ${kcount} bootable kernel(s) in /boot"
+  local grub_efi_name
+  case "$_REFIND_ARCH" in
+    x64)  grub_efi_name="grubx64.efi"  ;;
+    aa64) grub_efi_name="grubaa64.efi" ;;
+    ia32) grub_efi_name="grubia32.efi" ;;
+  esac
+  local grub_efi="${_REFIND_ESP}/EFI/fedora/${grub_efi_name}"
+  if run_sudo test -s "$grub_efi"; then
+    log "  [✓] GRUB EFI binary present for chainloading: $grub_efi"
   else
-    warn "  [✗] No non-rescue kernels found in /boot"
+    warn "  [✗] GRUB EFI binary not found: $grub_efi — rEFInd will have nothing to chainload."
     errors=$(( errors + 1 ))
   fi
 
-  (( errors == 0 )) || die "rEFInd validation failed ($errors error(s)). Fix the warnings above before removing GRUB."
+  (( errors == 0 )) || die "rEFInd validation failed ($errors error(s)). Fix the warnings above and re-run."
   log "rEFInd validation passed."
 }
 
-refind_backup_grub() {
-  local bdir="${REFIND_RECOVERY_DIR}/${TIMESTAMP}"
-  run_sudo install -d -m 0750 "$bdir"
+grub_upsert_default() {
+  local key="$1"
+  local value="$2"
+  local path="/etc/default/grub"
+  local tmp; tmp="$(mktemp)"
 
-  local efi_fedora="${_REFIND_ESP}/EFI/fedora"
-  if [[ -d "$efi_fedora" ]]; then
-    run_sudo cp -a "$efi_fedora" "${bdir}/EFI-fedora"
-    log "Backed up $efi_fedora → ${bdir}/EFI-fedora."
-  fi
+  awk -v key="$key" -v value="$value" '
+    BEGIN { replaced = 0 }
+    $0 ~ "^[[:space:]]*#?[[:space:]]*" key "=" {
+      print key "=" value
+      replaced = 1
+      next
+    }
+    { print }
+    END {
+      if (!replaced) print key "=" value
+    }
+  ' "$path" >"$tmp"
 
-  local f
-  for f in /etc/default/grub /boot/grub2/grub.cfg /boot/grub2/grubenv; do
-    [[ -f "$f" ]] && run_sudo cp -a "$f" "${bdir}/" && log "Backed up $f."
-  done
-
-  run_sudo efibootmgr -v 2>/dev/null >"${bdir}/efibootmgr-pre-removal.txt" || true
-  log "Saved efibootmgr state → ${bdir}/efibootmgr-pre-removal.txt."
-  printf '%s\n' "$bdir"
+  run_sudo install -m 0644 "$tmp" "$path"
+  rm -f "$tmp"
 }
 
-refind_remove_grub() {
-  local bdir="$1"
+refind_configure_grub_boot() {
+  local grub_default="/etc/default/grub"
+  [[ -f "$grub_default" ]] || {
+    warn "$grub_default not found; skipping GRUB timeout configuration."
+    return 0
+  }
 
-  # Remove Fedora GRUB NVRAM entries — only those whose loader path contains
-  # EFI\fedora (verbose efibootmgr output includes the loader path).
-  log "Removing Fedora GRUB NVRAM entries."
-  local boot_entry boot_num
-  while IFS= read -r boot_entry; do
-    [[ "$boot_entry" =~ ^Boot([0-9A-Fa-f]{4}) ]] || continue
-    boot_num="${BASH_REMATCH[1]}"
-    [[ "${boot_num^^}" == "${_REFIND_BOOT_NUM^^}" ]] && continue
-    if echo "$boot_entry" | grep -qiE '\\EFI\\fedora\\|File.*fedora'; then
-      log "  Removing GRUB NVRAM entry Boot${boot_num}."
-      run_sudo efibootmgr --bootnum "$boot_num" --delete-bootnum 2>/dev/null || \
-        warn "  Could not remove Boot${boot_num}."
-      record_change "Removed GRUB NVRAM entry Boot${boot_num}."
-    fi
-  done < <(run_sudo efibootmgr -v 2>/dev/null || true)
+  log "Configuring GRUB for instant, silent boot (rEFInd chainloads it directly)."
+  backup_system_path "$grub_default"
 
-  # Remove the GRUB *bootloader* EFI packages only. grub2-common and
-  # grub2-tools/grub2-tools-minimal are NOT removed:
-  #   - grubby requires (grub2-tools OR grub2-tools-minimal), and both of
-  #     those require grub2-common — dnf will refuse (correctly) to remove
-  #     grub2-common while grubby stays installed, and the WHOLE batch
-  #     removal aborts if it's included alongside removable packages.
-  #   - grub2-common ships /usr/lib/kernel/install.d/20-grub.install and
-  #     95-set-boot-entry.install, which are what actually WRITE
-  #     /boot/loader/entries/*.conf BLS files on every kernel install —
-  #     this is Fedora's kernel-install plumbing, unrelated to which
-  #     bootloader (GRUB, rEFInd, ...) ultimately reads those entries.
-  #     Removing it would break BLS entry generation for future kernels.
-  #   - 20-grub.install calls grub2-mkrelpath, which ships only in the full
-  #     grub2-tools package (not -minimal) — confirmed by inspecting both
-  #     packages' file lists — and Fedora 44 has no /sbin/new-kernel-pkg
-  #     fallback, so that code path always runs. Removing grub2-tools would
-  #     break BLS entry paths on the next kernel update.
-  # ⚠ Verify package names against: dnf list installed 'grub2*'
-  local grub_pkgs=(
-    grub2-efi-x64
-    grub2-efi-x64-cdboot
-    grub2-efi-aa64
-    grub2-efi-ia32
-    grub2-efi-x64-modules
-    grub2-tools-extra
-  )
-  local to_remove=() pkg
-  for pkg in "${grub_pkgs[@]}"; do
-    package_installed "$pkg" && to_remove+=("$pkg")
-  done
-  if (( ${#to_remove[@]} > 0 )); then
-    log "Removing GRUB packages: ${to_remove[*]}."
-    run_sudo "$DNF_BIN" remove -y "${to_remove[@]}" || \
-      warn "Some GRUB packages could not be removed: ${to_remove[*]}."
-    record_change "Removed GRUB packages: ${to_remove[*]}."
+  grub_upsert_default GRUB_TIMEOUT 0
+  grub_upsert_default GRUB_TIMEOUT_STYLE hidden
+
+  if have_command grub2-mkconfig; then
+    run_sudo grub2-mkconfig -o /boot/grub2/grub.cfg || \
+      warn "grub2-mkconfig failed; GRUB timeout change may not take effect until it's regenerated."
+    record_change "Set GRUB_TIMEOUT=0 (hidden menu) and regenerated grub.cfg for instant boot."
   else
-    log "No target GRUB packages were installed."
+    warn "grub2-mkconfig not found; GRUB_TIMEOUT was set in $grub_default but grub.cfg was not regenerated."
   fi
-
-  # grub2-efi-x64 owns /boot/grub2/grubenv. If its removal deleted that file,
-  # recreate an empty valid env block so 95-set-boot-entry.install's
-  # `grub2-editenv - set ...` calls (still exercised by every kernel install,
-  # since grub2-common's plugins are kept) have a valid file to operate on.
-  if have_command grub2-editenv && [[ ! -f /boot/grub2/grubenv ]]; then
-    run_sudo grub2-editenv /boot/grub2/grubenv create && \
-      log "Recreated empty /boot/grub2/grubenv (still used by kernel-install BLS bookkeeping)."
-  fi
-
-  # Clean up GRUB's generated (non-package-owned) leftovers under /boot/grub2:
-  # grub.cfg is dead now that GRUB never runs, and themes/ is only ever our
-  # own Sleek theme copy. Everything else in /boot/grub2 (grubenv, and any
-  # grub2-common-owned files) is left alone — see comment above.
-  local leftover
-  for leftover in /boot/grub2/grub.cfg /boot/grub2/themes; do
-    if run_sudo test -e "$leftover"; then
-      run_sudo rm -rf "$leftover"
-      log "  Removed: $leftover."
-      record_change "Removed GRUB leftover: $leftover."
-    fi
-  done
-
-  # Remove GRUB EFI files from the ESP.  Keep shimx64.efi and MokManager.efi —
-  # shim is needed for Secure Boot and for signing other EFI tools.
-  local efi_fedora="${_REFIND_ESP}/EFI/fedora"
-  if [[ -d "$efi_fedora" ]]; then
-    local grub_files=(
-      grubx64.efi grubaa64.efi grubenv grub.cfg
-      fonts locale
-    )
-    local gf
-    for gf in "${grub_files[@]}"; do
-      local fp="${efi_fedora}/${gf}"
-      if run_sudo test -e "$fp"; then
-        run_sudo rm -rf "$fp"
-        log "  Removed: $fp."
-        record_change "Removed GRUB EFI file: $fp."
-      fi
-    done
-    # Remove the directory only if empty (shim/MOK files may remain)
-    if [[ -z "$(run_sudo find "$efi_fedora" -maxdepth 1 -mindepth 1 -print 2>/dev/null | head -1)" ]]; then
-      run_sudo rmdir "$efi_fedora" 2>/dev/null || true
-      log "  Removed empty directory: $efi_fedora."
-    else
-      log "  Kept $efi_fedora (non-GRUB files remain, e.g. shim/MokManager)."
-    fi
-  fi
-
-  log "GRUB removal complete. Recovery backup: $bdir."
 }
 
 refind_print_summary() {
-  local bdir="${1:-n/a}"
-
   printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_CYAN" "$COLOR_RESET"
-  printf '%s  rEFInd Bootloader Summary%s\n' "$COLOR_CYAN" "$COLOR_RESET"
+  printf '%s  rEFInd Boot Manager Summary%s\n' "$COLOR_CYAN" "$COLOR_RESET"
   printf '%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_CYAN" "$COLOR_RESET"
   printf '\n'
-  printf '  EFI System Partition : %s\n'            "$_REFIND_ESP"
-  printf '  rEFInd EFI binary    : %s/%s/%s\n'     "$_REFIND_ESP" "$REFIND_ESP_SUBDIR" "$_REFIND_EFI_NAME"
-  printf '  rEFInd config        : %s/%s/refind.conf\n' "$_REFIND_ESP" "$REFIND_ESP_SUBDIR"
-  if [[ "$_REFIND_THEME_INSTALLED" == "1" ]]; then
-    printf '  rEFInd theme         : %s (%s/%s/themes/%s)\n' \
-      "$REFIND_THEME_NAME" "$_REFIND_ESP" "$REFIND_ESP_SUBDIR" "$REFIND_THEME_NAME"
-  else
-    printf '  rEFInd theme         : none (default look)\n'
+  printf '  EFI System Partition : %s\n'                "$_REFIND_ESP"
+  printf '  rEFInd EFI binary    : %s/%s/%s\n'           "$_REFIND_ESP" "$REFIND_ESP_SUBDIR" "$_REFIND_EFI_NAME"
+  printf '  rEFInd config        : %s/%s/refind.conf\n'  "$_REFIND_ESP" "$REFIND_ESP_SUBDIR"
+  printf '  Boots into           : existing GRUB installation (chainloaded, unchanged)\n'
+  printf '  GRUB menu            : hidden, 0s timeout (instant boot)\n'
+  printf '  Secure Boot state    : %s\n'                 "$_REFIND_SECURE_BOOT"
+  printf '  NVRAM entry          : Boot%s  (%s)\n'        "${_REFIND_BOOT_NUM:-???}" "$REFIND_ENTRY_LABEL"
+  if [[ -n "$_GRUB_BOOT_NUM" ]]; then
+    printf '  GRUB NVRAM entry     : Boot%s  (kept as-is, untouched fallback)\n' "$_GRUB_BOOT_NUM"
   fi
-  printf '  Kernel options file  : /boot/refind_linux.conf\n'
-  printf '  Secure Boot state    : %s\n'            "$_REFIND_SECURE_BOOT"
-  printf '  NVRAM entry          : Boot%s  (%s)\n' "${_REFIND_BOOT_NUM:-???}" "$REFIND_ENTRY_LABEL"
-  printf '  GRUB backup dir      : %s\n'            "$bdir"
   printf '\n'
   printf '  %sCurrent UEFI boot order:%s\n' "$COLOR_BOLD" "$COLOR_RESET"
   run_sudo efibootmgr 2>/dev/null | grep -E '^Boot[0-9A-Fa-f]{4}' | sed 's/^/    /' || true
   printf '\n'
-  local esp_part_dev="${_REFIND_ESP_DISK}${_REFIND_ESP_PARTNUM}"
-  [[ "$_REFIND_ESP_DISK" =~ nvme|mmcblk|nbd ]] && esp_part_dev="${_REFIND_ESP_DISK}p${_REFIND_ESP_PARTNUM}"
-
   printf '  %sRecovery (if rEFInd does not boot):%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
-  printf '  1. Boot Fedora live media.\n'
-  printf '  2. Mount the ESP and restore GRUB EFI files:\n'
-  printf '       sudo mount %s /mnt\n' "$esp_part_dev"
-  printf '       sudo mkdir -p /mnt/EFI/fedora\n'
-  printf '       sudo cp -r %s/EFI-fedora/. /mnt/EFI/fedora/\n' "$bdir"
-  printf '       (use cp -r, not -a: the ESP is vfat and cannot store Unix ownership)\n'
-  printf '  3. Re-register the GRUB NVRAM entry:\n'
-  printf '       sudo efibootmgr --create --disk %s --part %s \\\n' \
-    "$_REFIND_ESP_DISK" "$_REFIND_ESP_PARTNUM"
-  printf '         --label "fedora" --loader "\\\\EFI\\\\fedora\\\\shimx64.efi"\n'
-  printf '  4. Reboot.\n'
+  printf '  GRUB was NOT modified or removed — only rEFInd'"'"'s own NVRAM entry was\n'
+  printf '  added/reordered.\n'
+  if [[ -n "$_GRUB_BOOT_NUM" ]]; then
+    printf '  1. At the firmware boot menu (usually F12, F11, Esc, or Del at power-on),\n'
+    printf '     select Boot%s directly — this bypasses rEFInd entirely and boots\n' "$_GRUB_BOOT_NUM"
+    printf '     straight into GRUB.\n'
+    printf '  2. To make that permanent:\n'
+    printf '       sudo efibootmgr --bootorder %s\n' "$_GRUB_BOOT_NUM"
+  else
+    printf '  1. At the firmware boot menu (usually F12, F11, Esc, or Del at power-on),\n'
+    printf '     look for a "Fedora" or similar entry and select it directly to bypass\n'
+    printf '     rEFInd and boot straight into GRUB.\n'
+  fi
   if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
     printf '\n  %sSecure Boot — action required before rEFInd will start:%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
     printf '  refind-install was run with --localkeys, which generated a local signing\n'
@@ -875,10 +671,11 @@ refind_print_summary() {
 }
 
 install_refind() {
-  warn "REPLACING BOOTLOADER: rEFInd will become the primary UEFI boot manager."
-  warn "Have a Fedora live USB ready in case of boot failure."
+  warn "rEFInd will be installed as the primary UEFI boot manager."
+  warn "It chainloads your existing GRUB installation — GRUB itself is not removed"
+  warn "or modified beyond setting its timeout to 0 for an instant, silent boot."
   if [[ "$ASSUME_YES" != "1" ]]; then
-    ask_yes_no "Continue with rEFInd bootloader migration?" y || {
+    ask_yes_no "Continue with rEFInd installation?" y || {
       log "rEFInd installation cancelled by user."
       return 0
     }
@@ -891,30 +688,14 @@ install_refind() {
   refind_check_secure_boot
 
   refind_install_package
-  refind_install_theme
   refind_locate_nvram_entry
+  refind_locate_grub_entry
   refind_write_conf
-  refind_write_linux_conf
   refind_validate
+  refind_configure_grub_boot
 
-  local bdir="n/a (GRUB not removed)"
-  if [[ "$REFIND_REMOVE_GRUB" == "1" ]]; then
-    if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
-      warn "Secure Boot is enabled — GRUB will NOT be removed automatically."
-      warn "Resolve Secure Boot (see summary below), verify rEFInd boots, then re-run"
-      warn "with REFIND_REMOVE_GRUB=1 to skip reinstall and only perform GRUB removal."
-    else
-      bdir="$(refind_backup_grub)"
-      refind_remove_grub "$bdir"
-      log "Post-removal validation."
-      refind_validate
-    fi
-  else
-    log "GRUB not removed (REFIND_REMOVE_GRUB=0). Verify boot, then re-run with REFIND_REMOVE_GRUB=1."
-  fi
-
-  refind_print_summary "$bdir"
-  record_change "Installed rEFInd UEFI bootloader."
+  refind_print_summary
+  record_change "Installed rEFInd as the primary UEFI boot manager, chainloading GRUB."
 }
 
 print_summary() {
