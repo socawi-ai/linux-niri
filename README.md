@@ -7,6 +7,31 @@ are prepared to repair.
 
 Run as your normal user, not with `sudo`. The script asks for sudo when needed.
 
+## Quick install
+
+For a terminal-only machine (SSH session, bare TTY console — no browser
+needed), run directly from GitHub with no manual download step:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-niri-setup.sh)
+```
+
+Then, once the desktop is set up and you're ready for the boot manager:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh)
+```
+
+Both scripts read their yes/no prompts from `/dev/tty` directly, so this is
+safe to run this way — piping doesn't swallow the prompts.
+
+Fully unattended (no prompts at all, e.g. over SSH):
+
+```bash
+TARGET_USER=your-user ASSUME_YES=1 bash <(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-niri-setup.sh)
+ASSUME_YES=1 bash <(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh)
+```
+
 ## Fedora
 
 `fedora-niri-setup.sh` installs and configures:
