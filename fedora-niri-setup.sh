@@ -1445,7 +1445,7 @@ EOF
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Package: refind — available in Fedora official repos since F32.
-#   Provides: /usr/share/refind/{refind_x64.efi,icons/,drivers_x64/}
+#   Provides: /usr/share/rEFInd/refind/{refind_x64.efi,icons/,drivers_x64/}
 #             /usr/sbin/refind-install  (unused here; we manage files directly)
 #
 # Secure Boot note: the refind EFI binary from Fedora's package is NOT signed by
@@ -1558,7 +1558,7 @@ refind_check_secure_boot() {
     warn "Secure Boot is ENABLED."
     warn "The refind EFI binary from Fedora repos is NOT signed with the Fedora Secure Boot key."
     warn "After installation you must either:"
-    warn "  a) Enroll the rEFInd MOK cert:  sudo mokutil --import /usr/share/refind/keys/refind.cer"
+    warn "  a) Enroll the rEFInd MOK cert:  sudo mokutil --import /usr/share/rEFInd/refind/keys/refind.cer"
     warn "     then reboot and follow MokManager prompts; or"
     warn "  b) Disable Secure Boot in your UEFI firmware settings."
     warn "GRUB will NOT be removed automatically until Secure Boot is resolved."
@@ -1597,14 +1597,14 @@ refind_install_package() {
   log "Installing rEFInd package from Fedora repositories."
   dnf_install rEFInd || die "Failed to install rEFInd. Check repo access and try: dnf info rEFInd."
 
-  local share_dir="/usr/share/refind"
+  local share_dir="/usr/share/rEFInd/refind"
   [[ -f "${share_dir}/${_REFIND_EFI_NAME}" ]] || \
     die "rEFInd EFI binary not found at ${share_dir}/${_REFIND_EFI_NAME} after install."
   log "rEFInd source: ${share_dir}."
 }
 
 refind_copy_to_esp() {
-  local share_dir="/usr/share/refind"
+  local share_dir="/usr/share/rEFInd/refind"
   local esp_dir="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}"
   local efi_dest="${esp_dir}/${_REFIND_EFI_NAME}"
 
@@ -1980,7 +1980,7 @@ refind_print_summary() {
   if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
     printf '\n  %sSecure Boot — action required before rEFInd will start:%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
     printf '  Option A — Enroll MOK certificate:\n'
-    printf '    sudo mokutil --import /usr/share/refind/keys/refind.cer\n'
+    printf '    sudo mokutil --import /usr/share/rEFInd/refind/keys/refind.cer\n'
     printf '    Reboot and follow the blue MokManager screen.\n'
     printf '  Option B — Disable Secure Boot in UEFI firmware settings.\n'
   fi
