@@ -499,9 +499,12 @@ refind_install_theme() {
   run_sudo install -d -m 0755 "$(dirname "$theme_dest")"
 
   local tmp_theme; tmp_theme="$(mktemp -d)"
-  cp -a "${REFIND_THEME_DIR}/." "${tmp_theme}/"
+  cp -r "${REFIND_THEME_DIR}/." "${tmp_theme}/"
   rm -rf "${tmp_theme}/.git"
-  run_sudo cp -a "$tmp_theme" "$theme_dest"
+  # -r, not -a: the ESP is vfat, which has no concept of Unix ownership —
+  # cp -a always fails trying to chown there, even as root.
+  run_sudo mkdir -p "$theme_dest"
+  run_sudo cp -r "${tmp_theme}/." "${theme_dest}/"
   rm -rf "$tmp_theme"
 
   run_sudo test -f "${theme_dest}/theme.conf" || \
@@ -843,11 +846,16 @@ refind_print_summary() {
   printf '  %sCurrent UEFI boot order:%s\n' "$COLOR_BOLD" "$COLOR_RESET"
   run_sudo efibootmgr 2>/dev/null | grep -E '^Boot[0-9A-Fa-f]{4}' | sed 's/^/    /' || true
   printf '\n'
+  local esp_part_dev="${_REFIND_ESP_DISK}${_REFIND_ESP_PARTNUM}"
+  [[ "$_REFIND_ESP_DISK" =~ nvme|mmcblk|nbd ]] && esp_part_dev="${_REFIND_ESP_DISK}p${_REFIND_ESP_PARTNUM}"
+
   printf '  %sRecovery (if rEFInd does not boot):%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
   printf '  1. Boot Fedora live media.\n'
   printf '  2. Mount the ESP and restore GRUB EFI files:\n'
-  printf '       sudo mount %s /mnt\n' "$_REFIND_ESP_DISK"
-  printf '       sudo cp -a %s/EFI-fedora /mnt/EFI/fedora\n' "$bdir"
+  printf '       sudo mount %s /mnt\n' "$esp_part_dev"
+  printf '       sudo mkdir -p /mnt/EFI/fedora\n'
+  printf '       sudo cp -r %s/EFI-fedora/. /mnt/EFI/fedora/\n' "$bdir"
+  printf '       (use cp -r, not -a: the ESP is vfat and cannot store Unix ownership)\n'
   printf '  3. Re-register the GRUB NVRAM entry:\n'
   printf '       sudo efibootmgr --create --disk %s --part %s \\\n' \
     "$_REFIND_ESP_DISK" "$_REFIND_ESP_PARTNUM"
