@@ -628,7 +628,7 @@ refind_backup_grub() {
   fi
 
   local f
-  for f in /etc/default/grub /boot/grub2/grub.cfg; do
+  for f in /etc/default/grub /boot/grub2/grub.cfg /boot/grub2/grubenv; do
     [[ -f "$f" ]] && run_sudo cp -a "$f" "${bdir}/" && log "Backed up $f."
   done
 
@@ -656,8 +656,23 @@ refind_remove_grub() {
     fi
   done < <(run_sudo efibootmgr -v 2>/dev/null || true)
 
-  # Remove GRUB EFI packages — keep grubby (used by kernel-install hooks) and
-  # grub2-tools-minimal (provides grub2-editenv used by some scripts).
+  # Remove the GRUB *bootloader* EFI packages only. grub2-common and
+  # grub2-tools/grub2-tools-minimal are NOT removed:
+  #   - grubby requires (grub2-tools OR grub2-tools-minimal), and both of
+  #     those require grub2-common — dnf will refuse (correctly) to remove
+  #     grub2-common while grubby stays installed, and the WHOLE batch
+  #     removal aborts if it's included alongside removable packages.
+  #   - grub2-common ships /usr/lib/kernel/install.d/20-grub.install and
+  #     95-set-boot-entry.install, which are what actually WRITE
+  #     /boot/loader/entries/*.conf BLS files on every kernel install —
+  #     this is Fedora's kernel-install plumbing, unrelated to which
+  #     bootloader (GRUB, rEFInd, ...) ultimately reads those entries.
+  #     Removing it would break BLS entry generation for future kernels.
+  #   - 20-grub.install calls grub2-mkrelpath, which ships only in the full
+  #     grub2-tools package (not -minimal) — confirmed by inspecting both
+  #     packages' file lists — and Fedora 44 has no /sbin/new-kernel-pkg
+  #     fallback, so that code path always runs. Removing grub2-tools would
+  #     break BLS entry paths on the next kernel update.
   # ⚠ Verify package names against: dnf list installed 'grub2*'
   local grub_pkgs=(
     grub2-efi-x64
@@ -665,7 +680,6 @@ refind_remove_grub() {
     grub2-efi-aa64
     grub2-efi-ia32
     grub2-efi-x64-modules
-    grub2-common
     grub2-tools-extra
   )
   local to_remove=() pkg
@@ -680,6 +694,28 @@ refind_remove_grub() {
   else
     log "No target GRUB packages were installed."
   fi
+
+  # grub2-efi-x64 owns /boot/grub2/grubenv. If its removal deleted that file,
+  # recreate an empty valid env block so 95-set-boot-entry.install's
+  # `grub2-editenv - set ...` calls (still exercised by every kernel install,
+  # since grub2-common's plugins are kept) have a valid file to operate on.
+  if have_command grub2-editenv && [[ ! -f /boot/grub2/grubenv ]]; then
+    run_sudo grub2-editenv /boot/grub2/grubenv create && \
+      log "Recreated empty /boot/grub2/grubenv (still used by kernel-install BLS bookkeeping)."
+  fi
+
+  # Clean up GRUB's generated (non-package-owned) leftovers under /boot/grub2:
+  # grub.cfg is dead now that GRUB never runs, and themes/ is only ever our
+  # own Sleek theme copy. Everything else in /boot/grub2 (grubenv, and any
+  # grub2-common-owned files) is left alone — see comment above.
+  local leftover
+  for leftover in /boot/grub2/grub.cfg /boot/grub2/themes; do
+    if run_sudo test -e "$leftover"; then
+      run_sudo rm -rf "$leftover"
+      log "  Removed: $leftover."
+      record_change "Removed GRUB leftover: $leftover."
+    fi
+  done
 
   # Remove GRUB EFI files from the ESP.  Keep shimx64.efi and MokManager.efi —
   # shim is needed for Secure Boot and for signing other EFI tools.
