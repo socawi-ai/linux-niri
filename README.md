@@ -13,23 +13,27 @@ For a terminal-only machine (SSH session, bare TTY console — no browser
 needed), run directly from GitHub with no manual download step:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-niri-setup.sh)
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-niri-setup.sh | bash
 ```
 
 Then, once the desktop is set up and you're ready for the boot manager:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh)
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh | bash
 ```
 
-Both scripts read their yes/no prompts from `/dev/tty` directly, so this is
-safe to run this way — piping doesn't swallow the prompts.
+This form works the same in fish, zsh, or bash as your login shell — no
+process substitution (`<(...)`) involved, which fish doesn't support without
+its own `psub` command. Both scripts read their yes/no prompts from
+`/dev/tty` directly rather than stdin, so piping through `curl | bash` this
+way is safe — it doesn't swallow the prompts.
 
-Fully unattended (no prompts at all, e.g. over SSH):
+Fully unattended (no prompts at all, e.g. over SSH). Using `env` here instead
+of a bare `VAR=val` prefix, since fish doesn't support that prefix form:
 
 ```bash
-TARGET_USER=your-user ASSUME_YES=1 bash <(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-niri-setup.sh)
-ASSUME_YES=1 bash <(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh)
+env TARGET_USER=your-user ASSUME_YES=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-niri-setup.sh)"
+env ASSUME_YES=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh)"
 ```
 
 ## Fedora
@@ -75,7 +79,7 @@ chmod +x fedora-niri-setup.sh
 Unattended run:
 
 ```bash
-TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
+env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
 ```
 
 ## rEFInd boot manager
@@ -110,13 +114,13 @@ chmod +x refind-migrate.sh
 Unattended run:
 
 ```bash
-ASSUME_YES=1 ./refind-migrate.sh
+env ASSUME_YES=1 ./refind-migrate.sh
 ```
 
 Skip the theme:
 
 ```bash
-INSTALL_REFIND_THEME=0 ./refind-migrate.sh
+env INSTALL_REFIND_THEME=0 ./refind-migrate.sh
 ```
 
 If Secure Boot is enabled, rEFInd is self-signed with a locally generated key
