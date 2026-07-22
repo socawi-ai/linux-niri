@@ -1555,13 +1555,14 @@ refind_check_secure_boot() {
   log "Secure Boot: $_REFIND_SECURE_BOOT."
 
   if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
-    warn "Secure Boot is ENABLED."
-    warn "The refind EFI binary from Fedora repos is NOT signed with the Fedora Secure Boot key."
-    warn "After installation you must either:"
-    warn "  a) Enroll the rEFInd MOK cert:  sudo mokutil --import /usr/share/rEFInd/refind/keys/refind.cer"
-    warn "     then reboot and follow MokManager prompts; or"
-    warn "  b) Disable Secure Boot in your UEFI firmware settings."
-    warn "GRUB will NOT be removed automatically until Secure Boot is resolved."
+    warn "Secure Boot is ENABLED. Fedora's rEFInd package is not signed with the Fedora"
+    warn "Secure Boot key, so refind-install will be run with --localkeys, which generates"
+    warn "a local signing key and self-signs the rEFInd binaries with it."
+    warn "Because this script runs refind-install non-interactively (--yes), the MOK"
+    warn "enrollment prompt is skipped — you must enroll the key yourself after this run"
+    warn "finishes (exact command is printed in the summary below). Until that key is"
+    warn "enrolled and the system has rebooted successfully with rEFInd, GRUB will NOT"
+    warn "be removed automatically."
   fi
 }
 
@@ -1597,71 +1598,31 @@ refind_install_package() {
   log "Installing rEFInd package from Fedora repositories."
   dnf_install rEFInd || die "Failed to install rEFInd. Check repo access and try: dnf info rEFInd."
 
-  local share_dir="/usr/share/rEFInd/refind"
-  [[ -f "${share_dir}/${_REFIND_EFI_NAME}" ]] || \
-    die "rEFInd EFI binary not found at ${share_dir}/${_REFIND_EFI_NAME} after install."
-  log "rEFInd source: ${share_dir}."
-}
+  have_command refind-install || \
+    die "refind-install not found after installing rEFInd (expected from rEFInd-tools)."
 
-refind_copy_to_esp() {
-  local share_dir="/usr/share/rEFInd/refind"
+  # refind-install auto-detects the ESP, copies the EFI binary, icons, and
+  # filesystem drivers, writes a starter refind.conf and /boot/refind_linux.conf,
+  # and registers (and de-duplicates) the UEFI NVRAM entry itself — including
+  # placing it first in BootOrder. We overlay our own refind.conf and
+  # refind_linux.conf afterwards for consistent, predictable settings.
+  local install_args=(--yes)
+  if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
+    install_args+=(--localkeys)
+  fi
+
+  log "Running: sudo refind-install ${install_args[*]}"
+  run_sudo refind-install "${install_args[@]}" || \
+    die "refind-install failed. Review the output above for the specific error."
+
   local esp_dir="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}"
   local efi_dest="${esp_dir}/${_REFIND_EFI_NAME}"
+  run_sudo test -s "$efi_dest" || \
+    die "refind-install completed, but ${efi_dest} is missing or empty."
+  log "rEFInd installed at: $efi_dest."
 
-  backup_system_path "$esp_dir"
-  run_sudo install -d -m 0755 "$esp_dir"
-
-  # EFI binary
-  local tmp_local
-  tmp_local="$(mktemp)"
-  cp -f "${share_dir}/${_REFIND_EFI_NAME}" "$tmp_local"
-  run_sudo install -m 0644 "$tmp_local" "$efi_dest"
-  rm -f "$tmp_local"
-  log "Installed: $efi_dest."
-
-  # Icons (cosmetic but expected by rEFInd)
-  if [[ -d "${share_dir}/icons" ]]; then
-    local tmp_icons; tmp_icons="$(mktemp -d)"
-    cp -a "${share_dir}/icons/." "${tmp_icons}/"
-    run_sudo rm -rf "${esp_dir}/icons"
-    run_sudo mkdir -p "${esp_dir}/icons"
-    run_sudo cp -a "${tmp_icons}/." "${esp_dir}/icons/"
-    rm -rf "$tmp_icons"
-    log "Installed rEFInd icons to ${esp_dir}/icons/."
-  fi
-
-  # Filesystem drivers — allow rEFInd to read ext4/XFS/Btrfs /boot directly
-  local drivers_src="${share_dir}/drivers_${_REFIND_ARCH}"
-  if [[ -d "$drivers_src" ]]; then
-    local tmp_drv; tmp_drv="$(mktemp -d)"
-    cp -a "${drivers_src}/." "${tmp_drv}/"
-    run_sudo rm -rf "${esp_dir}/drivers_${_REFIND_ARCH}"
-    run_sudo mkdir -p "${esp_dir}/drivers_${_REFIND_ARCH}"
-    run_sudo cp -a "${tmp_drv}/." "${esp_dir}/drivers_${_REFIND_ARCH}/"
-    rm -rf "$tmp_drv"
-    log "Installed rEFInd filesystem drivers (${_REFIND_ARCH})."
-  else
-    warn "No drivers at ${drivers_src}; rEFInd may not read /boot on non-ESP filesystems."
-  fi
-
-  # Secure Boot: chain shim → rEFInd (shim looks for grubx64.efi in its own dir)
   if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
-    local shim_src="" shim_candidate
-    for shim_candidate in \
-        "${_REFIND_ESP}/EFI/fedora/shimx64.efi" \
-        "${_REFIND_ESP}/EFI/fedora/shim.efi" \
-        "/usr/share/shim-signed/shimx64.efi"; do
-      [[ -f "$shim_candidate" ]] && shim_src="$shim_candidate" && break
-    done
-    if [[ -n "$shim_src" ]]; then
-      run_sudo cp -f "$shim_src" "${esp_dir}/shim${_REFIND_ARCH}.efi"
-      # shim's compiled-in second-stage filename is grubx64.efi — alias rEFInd to that name
-      run_sudo cp -f "$efi_dest" "${esp_dir}/grub${_REFIND_ARCH}.efi"
-      log "SB: copied shim and created grub${_REFIND_ARCH}.efi alias → NVRAM will target shimx64.efi."
-    else
-      warn "Secure Boot is enabled but shimx64.efi was not found on the ESP."
-      warn "NVRAM will target refind_x64.efi directly; firmware must trust it or boot will fail."
-    fi
+    record_change "Installed rEFInd with a locally generated Secure Boot key (--localkeys). MOK enrollment is still required — see summary."
   fi
 }
 
@@ -1694,7 +1655,7 @@ dont_scan_volumes "Recovery,RECOVERY,WRE"
 dont_scan_files rescue,fallback
 
 # Boot options come from /boot/refind_linux.conf next to each kernel.
-# Do not manage NVRAM from inside rEFInd (we did it with efibootmgr).
+# NVRAM is managed by refind-install/efibootmgr, not by rEFInd itself.
 use_nvram false
 
 # Default to the most recently booted entry.
@@ -1735,67 +1696,48 @@ EOF
   log "Kernel cmdline: ${cmdline}."
 }
 
-refind_register_nvram() {
-  have_command efibootmgr || die "efibootmgr is required to register the rEFInd NVRAM entry."
+refind_locate_nvram_entry() {
+  # refind-install already created (or reused) the NVRAM entry and placed it
+  # first in BootOrder. This just finds its Boot#### number for our own
+  # validation/removal logic, normalizes its label, and re-asserts BootOrder
+  # as a defense-in-depth check (idempotent — safe if already correct).
+  have_command efibootmgr || die "efibootmgr is required to validate the rEFInd NVRAM entry."
 
-  # For Secure Boot we chain through shim; otherwise load rEFInd directly.
-  local loader_rel
-  if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]] && \
-     run_sudo test -f "${_REFIND_ESP}/${REFIND_ESP_SUBDIR}/shim${_REFIND_ARCH}.efi"; then
-    loader_rel="${REFIND_ESP_SUBDIR}/shim${_REFIND_ARCH}.efi"
-  else
-    loader_rel="${REFIND_ESP_SUBDIR}/${_REFIND_EFI_NAME}"
-  fi
-  # UEFI uses backslash-separated paths
-  local loader_uefi
-  loader_uefi="\\$(printf '%s' "$loader_rel" | tr '/' '\\')"
-
-  # Remove any existing rEFInd NVRAM entries (idempotency)
   local boot_entry boot_num
+  _REFIND_BOOT_NUM=""
   while IFS= read -r boot_entry; do
     [[ "$boot_entry" =~ ^Boot([0-9A-Fa-f]{4}) ]] || continue
     boot_num="${BASH_REMATCH[1]}"
-    if echo "$boot_entry" | grep -qi "refind\|${REFIND_ENTRY_LABEL}"; then
-      log "Removing stale rEFInd NVRAM entry: Boot${boot_num}."
-      run_sudo efibootmgr --bootnum "$boot_num" --delete-bootnum 2>/dev/null || \
-        warn "Could not remove Boot${boot_num}."
-    fi
-  done < <(run_sudo efibootmgr -v 2>/dev/null || true)
-
-  log "Creating NVRAM entry '${REFIND_ENTRY_LABEL}' → ${loader_uefi}."
-  run_sudo efibootmgr \
-    --create \
-    --disk   "$_REFIND_ESP_DISK" \
-    --part   "$_REFIND_ESP_PARTNUM" \
-    --label  "$REFIND_ENTRY_LABEL" \
-    --loader "$loader_uefi" \
-    --unicode || die "efibootmgr failed to create the rEFInd NVRAM entry."
-
-  # Identify the newly created entry number
-  _REFIND_BOOT_NUM=""
-  while IFS= read -r boot_entry; do
-    if echo "$boot_entry" | grep -qF "$REFIND_ENTRY_LABEL"; then
-      [[ "$boot_entry" =~ ^Boot([0-9A-Fa-f]{4}) ]] && \
-        _REFIND_BOOT_NUM="${BASH_REMATCH[1]}" && break
+    if echo "$boot_entry" | grep -qi "refind"; then
+      _REFIND_BOOT_NUM="$boot_num"
+      break
     fi
   done < <(run_sudo efibootmgr 2>/dev/null || true)
-  [[ -n "$_REFIND_BOOT_NUM" ]] || die "rEFInd NVRAM entry not found after creation."
+  [[ -n "$_REFIND_BOOT_NUM" ]] || die "No rEFInd NVRAM entry found after refind-install. Check efibootmgr output above."
 
-  # Place rEFInd first in BootOrder
-  local cur_order new_order filtered
+  if [[ -n "$REFIND_ENTRY_LABEL" ]]; then
+    local current_label
+    current_label="$(run_sudo efibootmgr 2>/dev/null | sed -n "s/^Boot${_REFIND_BOOT_NUM}\*\{0,1\}[[:space:]]*//p" | head -1)"
+    if [[ "$current_label" != "$REFIND_ENTRY_LABEL" ]]; then
+      run_sudo efibootmgr --bootnum "$_REFIND_BOOT_NUM" --label "$REFIND_ENTRY_LABEL" >/dev/null || \
+        warn "Could not rename NVRAM entry Boot${_REFIND_BOOT_NUM} to '${REFIND_ENTRY_LABEL}'."
+    fi
+  fi
+
+  local cur_order first filtered new_order
   cur_order="$(run_sudo efibootmgr 2>/dev/null | awk '/^BootOrder:/{print $2}' || true)"
-  if [[ -n "$cur_order" ]]; then
+  first="$(printf '%s' "$cur_order" | cut -d, -f1)"
+  if [[ "${first^^}" != "${_REFIND_BOOT_NUM^^}" ]]; then
     filtered="$(printf '%s' "$cur_order" | tr ',' '\n' \
                 | grep -iv "^${_REFIND_BOOT_NUM}$" | tr '\n' ',' | sed 's/,$//')"
     new_order="${_REFIND_BOOT_NUM}${filtered:+,${filtered}}"
-  else
-    new_order="$_REFIND_BOOT_NUM"
+    run_sudo efibootmgr --bootorder "$new_order" || \
+      warn "Could not set BootOrder. Set manually: sudo efibootmgr --bootorder ${new_order}"
+    log "Moved rEFInd to first in BootOrder (${new_order})."
   fi
-  run_sudo efibootmgr --bootorder "$new_order" || \
-    warn "Could not set BootOrder. Set manually: sudo efibootmgr --bootorder ${new_order}"
 
-  log "rEFInd is Boot${_REFIND_BOOT_NUM}, first in BootOrder (${new_order})."
-  record_change "Registered rEFInd as Boot${_REFIND_BOOT_NUM} and placed it first in BootOrder."
+  log "rEFInd NVRAM entry: Boot${_REFIND_BOOT_NUM}."
+  record_change "rEFInd registered as Boot${_REFIND_BOOT_NUM}, first in BootOrder."
 }
 
 refind_validate() {
@@ -1979,10 +1921,13 @@ refind_print_summary() {
   printf '  4. Reboot.\n'
   if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
     printf '\n  %sSecure Boot — action required before rEFInd will start:%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
-    printf '  Option A — Enroll MOK certificate:\n'
-    printf '    sudo mokutil --import /usr/share/rEFInd/refind/keys/refind.cer\n'
-    printf '    Reboot and follow the blue MokManager screen.\n'
-    printf '  Option B — Disable Secure Boot in UEFI firmware settings.\n'
+    printf '  refind-install was run with --localkeys, which generated a local signing\n'
+    printf '  key and self-signed the rEFInd binaries. That key is NOT yet trusted by\n'
+    printf '  your firmware. Option A (recommended) — enroll it as a MOK:\n'
+    printf '    sudo mokutil --import /etc/refind.d/keys/refind_local.cer\n'
+    printf '    (you will set a one-time password, then reboot and enroll it at the\n'
+    printf '     blue MokManager screen using that password)\n'
+    printf '  Option B — disable Secure Boot in your UEFI firmware settings instead.\n'
   fi
   printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n' "$COLOR_CYAN" "$COLOR_RESET"
 }
@@ -2009,10 +1954,9 @@ install_refind() {
   refind_check_secure_boot
 
   refind_install_package
-  refind_copy_to_esp
+  refind_locate_nvram_entry
   refind_write_conf
   refind_write_linux_conf
-  refind_register_nvram
   refind_validate
 
   local bdir="n/a (GRUB not removed)"
