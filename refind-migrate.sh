@@ -20,11 +20,16 @@ set -Eeuo pipefail
 # automatically until Secure Boot is resolved and rEFInd has been verified
 # to boot.
 #
+# Theme: installs a visual theme from a git repo following the standard
+# rEFInd theme layout (banner/, icons/, selection/, theme.conf). Defaults to
+# https://github.com/NilsPvR/rEFInd-nils. Set INSTALL_REFIND_THEME=0 to skip.
+#
 # Usage:
 #   ./refind-migrate.sh                                # interactive
 #   ASSUME_YES=1 ./refind-migrate.sh                    # non-interactive
 #   REFIND_REMOVE_GRUB=0 ./refind-migrate.sh            # install only, keep GRUB
 #   ASSUME_YES=1 REFIND_REMOVE_GRUB=1 ./refind-migrate.sh   # full unattended migration
+#   INSTALL_REFIND_THEME=0 ./refind-migrate.sh          # skip the visual theme
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ASSUME_YES="${ASSUME_YES:-0}"
@@ -36,6 +41,14 @@ REFIND_ENTRY_LABEL="${REFIND_ENTRY_LABEL:-Fedora Linux}"
 REFIND_ESP_SUBDIR="${REFIND_ESP_SUBDIR:-EFI/refind}"
 REFIND_RECOVERY_DIR="${REFIND_RECOVERY_DIR:-/var/backups/bootloader-migration}"
 
+# rEFInd visual theme. Set INSTALL_REFIND_THEME=0 to skip (default rEFInd
+# look). Any git repo following the standard rEFInd theme layout
+# (banner/, icons/, selection/, theme.conf) works here.
+INSTALL_REFIND_THEME="${INSTALL_REFIND_THEME:-1}"
+REFIND_THEME_REPO="${REFIND_THEME_REPO:-https://github.com/NilsPvR/rEFInd-nils}"
+REFIND_THEME_NAME="${REFIND_THEME_NAME:-rEFInd-nils}"
+REFIND_THEME_DIR="${REFIND_THEME_DIR:-$HOME/.cache/fedora-niri-setup/refind-theme}"
+
 # Runtime state — populated by preflight functions; not user-configurable.
 _REFIND_ESP=""
 _REFIND_ESP_DISK=""
@@ -44,6 +57,7 @@ _REFIND_ARCH=""
 _REFIND_EFI_NAME=""
 _REFIND_SECURE_BOOT=""
 _REFIND_BOOT_NUM=""
+_REFIND_THEME_INSTALLED=""
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_FILE:-$HOME/refind-migrate-$TIMESTAMP.log}"
@@ -313,7 +327,12 @@ refind_detect_esp() {
   fi
   _REFIND_ESP="$esp"
 
-  dev="$(findmnt -n -o SOURCE "$esp" 2>/dev/null || true)"
+  # --first-only + head -1: a target can have more than one mount stacked on
+  # it (e.g. duplicate/propagated mounts in some VM setups), which would
+  # otherwise make $dev a multi-line string that no single-line regex below
+  # can match.
+  dev="$(findmnt -rn -o SOURCE --first-only "$esp" 2>/dev/null | head -1 || true)"
+  dev="${dev//[[:space:]]/}"
   [[ -n "$dev" ]] || die "Cannot determine block device backing ESP at $esp."
   dev="$(realpath "$dev" 2>/dev/null || printf '%s' "$dev")"
 
@@ -445,6 +464,54 @@ refind_install_package() {
   fi
 }
 
+refind_install_theme() {
+  [[ "$INSTALL_REFIND_THEME" == "1" ]] || {
+    log "rEFInd theme installation is disabled (INSTALL_REFIND_THEME=0)."
+    return 0
+  }
+
+  have_command git || dnf_install_best_effort git
+  if ! have_command git; then
+    warn "git is not available; skipping rEFInd theme install."
+    return 0
+  fi
+
+  log "Fetching rEFInd theme from ${REFIND_THEME_REPO}."
+  if [[ -d "${REFIND_THEME_DIR}/.git" ]]; then
+    git -C "$REFIND_THEME_DIR" pull --ff-only --quiet || \
+      warn "Could not update theme repo at ${REFIND_THEME_DIR}; using cached copy."
+  else
+    rm -rf "$REFIND_THEME_DIR"
+    if ! git clone --quiet "$REFIND_THEME_REPO" "$REFIND_THEME_DIR"; then
+      warn "Could not clone ${REFIND_THEME_REPO}; continuing without a theme."
+      return 0
+    fi
+  fi
+
+  [[ -f "${REFIND_THEME_DIR}/theme.conf" ]] || {
+    warn "${REFIND_THEME_DIR} has no theme.conf; not a valid rEFInd theme, skipping."
+    return 0
+  }
+
+  local theme_dest="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}/themes/${REFIND_THEME_NAME}"
+  backup_system_path "$theme_dest"
+  run_sudo rm -rf "$theme_dest"
+  run_sudo install -d -m 0755 "$(dirname "$theme_dest")"
+
+  local tmp_theme; tmp_theme="$(mktemp -d)"
+  cp -a "${REFIND_THEME_DIR}/." "${tmp_theme}/"
+  rm -rf "${tmp_theme}/.git"
+  run_sudo cp -a "$tmp_theme" "$theme_dest"
+  rm -rf "$tmp_theme"
+
+  run_sudo test -f "${theme_dest}/theme.conf" || \
+    die "Theme copy to ${theme_dest} failed — theme.conf missing after copy."
+
+  _REFIND_THEME_INSTALLED=1
+  log "Installed rEFInd theme '${REFIND_THEME_NAME}' to ${theme_dest}."
+  record_change "Installed rEFInd theme '${REFIND_THEME_NAME}' from ${REFIND_THEME_REPO}."
+}
+
 refind_write_conf() {
   local esp_dir="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}"
   local conf_dest="${esp_dir}/refind.conf"
@@ -483,6 +550,12 @@ default_selection lastbooted
 # Let the firmware choose the graphics resolution.
 resolution auto
 EOF
+
+  if [[ "$_REFIND_THEME_INSTALLED" == "1" ]]; then
+    printf '\n# Theme: %s (%s)\ninclude themes/%s/theme.conf\n' \
+      "$REFIND_THEME_NAME" "$REFIND_THEME_REPO" "$REFIND_THEME_NAME" >>"$tmp"
+  fi
+
   run_sudo install -m 0644 "$tmp" "$conf_dest"
   rm -f "$tmp"
   log "Wrote rEFInd config: $conf_dest."
@@ -756,6 +829,12 @@ refind_print_summary() {
   printf '  EFI System Partition : %s\n'            "$_REFIND_ESP"
   printf '  rEFInd EFI binary    : %s/%s/%s\n'     "$_REFIND_ESP" "$REFIND_ESP_SUBDIR" "$_REFIND_EFI_NAME"
   printf '  rEFInd config        : %s/%s/refind.conf\n' "$_REFIND_ESP" "$REFIND_ESP_SUBDIR"
+  if [[ "$_REFIND_THEME_INSTALLED" == "1" ]]; then
+    printf '  rEFInd theme         : %s (%s/%s/themes/%s)\n' \
+      "$REFIND_THEME_NAME" "$_REFIND_ESP" "$REFIND_ESP_SUBDIR" "$REFIND_THEME_NAME"
+  else
+    printf '  rEFInd theme         : none (default look)\n'
+  fi
   printf '  Kernel options file  : /boot/refind_linux.conf\n'
   printf '  Secure Boot state    : %s\n'            "$_REFIND_SECURE_BOOT"
   printf '  NVRAM entry          : Boot%s  (%s)\n' "${_REFIND_BOOT_NUM:-???}" "$REFIND_ENTRY_LABEL"
@@ -804,6 +883,7 @@ install_refind() {
   refind_check_secure_boot
 
   refind_install_package
+  refind_install_theme
   refind_locate_nvram_entry
   refind_write_conf
   refind_write_linux_conf
