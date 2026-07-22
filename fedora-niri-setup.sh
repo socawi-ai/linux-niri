@@ -1997,7 +1997,7 @@ install_refind() {
   warn "REPLACING BOOTLOADER: rEFInd will become the primary UEFI boot manager."
   warn "Have a Fedora live USB ready in case of boot failure."
   if [[ "$ASSUME_YES" != "1" ]]; then
-    ask_yes_no "Continue with rEFInd bootloader migration?" n || {
+    ask_yes_no "Continue with rEFInd bootloader migration?" y || {
       log "rEFInd installation cancelled by user."
       return 0
     }
