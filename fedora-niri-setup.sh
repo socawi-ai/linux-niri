@@ -1609,6 +1609,10 @@ refind_install_package() {
   local install_args=(--yes)
   if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
     install_args+=(--localkeys)
+    # --localkeys re-signs the rEFInd binaries with sbsign, which is not one
+    # of rEFInd's own dependencies.
+    have_command sbsign || dnf_install_best_effort sbsigntools
+    have_command sbsign || die "sbsign (from sbsigntools) is required for --localkeys but could not be installed."
   fi
 
   log "Running: sudo refind-install ${install_args[*]}"
