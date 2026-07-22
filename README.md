@@ -30,7 +30,7 @@ Run as your normal user, not with `sudo`. The script asks for sudo when needed.
 - LSFG-VK
 - Polaris with host setup and user-service autostart
 - Plymouth spinner
-- GRUB timeout and the forked dark Sleek GRUB theme in `grub/sleek-dark/`
+- GRUB timeout
 
 It also downloads this repo's configs and wallpapers:
 
@@ -53,16 +53,62 @@ Unattended run:
 TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
 ```
 
+## rEFInd boot manager
+
+`refind-migrate.sh` is a separate, standalone script — run it independently of
+`fedora-niri-setup.sh`, and re-run it on its own if something needs fixing.
+Bootloader changes are riskier than desktop setup, so they're kept out of the
+main script entirely.
+
+It installs [rEFInd](https://www.rodsbooks.com/refind/) as the primary UEFI
+boot manager. This does **not** replace GRUB or touch how Linux boots: GRUB
+stays installed exactly as it is, and rEFInd simply chainloads into it (its
+normal boot-loader scan finds the existing GRUB EFI binary and offers it as a
+menu entry). GRUB itself is reconfigured for an instant, silent boot
+(`GRUB_TIMEOUT=0`, hidden menu), so in practice: firmware -> rEFInd -> GRUB ->
+Linux, with no visible menus unless you interact with rEFInd's own timeout.
+
+It also installs the [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils)
+visual theme by default, since rEFInd's menu is the only boot menu you'll
+actually see.
+
+Have a Fedora live USB ready before running this, in case of boot failure.
+
+Run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh -o refind-migrate.sh
+chmod +x refind-migrate.sh
+./refind-migrate.sh
+```
+
+Unattended run:
+
+```bash
+ASSUME_YES=1 ./refind-migrate.sh
+```
+
+Skip the theme:
+
+```bash
+INSTALL_REFIND_THEME=0 ./refind-migrate.sh
+```
+
+If Secure Boot is enabled, rEFInd is self-signed with a locally generated key
+(Fedora's rEFInd package isn't signed with the Fedora Secure Boot key), and
+the script prints the exact `mokutil --import` command to enroll it after the
+run finishes.
+
+Recovery: GRUB is never modified or removed beyond its timeout, so if rEFInd
+fails to start, use your firmware's boot menu (usually F12, F11, Esc, or Del
+at power-on) to select the original GRUB boot entry directly — no live media
+needed.
+
 ## Backups
 
-The script backs up most replaced files.
+The scripts back up most replaced files.
 
 - user backups: `~/.local/share/fedora-niri-setup/backups/`
 - system backups: `/var/backups/fedora-niri-setup/`
 
 Each run also writes a timestamped log file in the user's home directory.
-
-## Vendored Theme
-
-`grub/sleek-dark/` is a local copy of the dark Sleek GRUB theme from
-`sandesh236/sleek--themes`. Its MIT license is kept with the theme files.
