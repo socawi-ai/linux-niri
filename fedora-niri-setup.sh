@@ -1593,10 +1593,9 @@ refind_resolve_cmdline() {
 }
 
 refind_install_package() {
-  # refind is in Fedora's official repositories — no COPR needed.
-  # ⚠ Verify with: dnf info refind
-  log "Installing refind package from Fedora repositories."
-  dnf_install refind || die "Failed to install refind. Check repo access and try: dnf info refind."
+  # Package name is 'rEFInd' (case-sensitive) in Fedora 44.
+  log "Installing rEFInd package from Fedora repositories."
+  dnf_install rEFInd || die "Failed to install rEFInd. Check repo access and try: dnf info rEFInd."
 
   local share_dir="/usr/share/refind"
   [[ -f "${share_dir}/${_REFIND_EFI_NAME}" ]] || \
