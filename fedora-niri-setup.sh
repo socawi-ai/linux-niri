@@ -6,12 +6,10 @@ CONFIG_REPO_DIR_WAS_SET=0
 CONFIG_SOURCE_DIR_WAS_SET=0
 USER_BACKUP_ROOT_WAS_SET=0
 MCMOJAVE_CURSORS_DIR_WAS_SET=0
-SLEEK_GRUB_THEME_DIR_WAS_SET=0
 [[ -n "${CONFIG_REPO_DIR+x}" ]] && CONFIG_REPO_DIR_WAS_SET=1
 [[ -n "${CONFIG_SOURCE_DIR+x}" ]] && CONFIG_SOURCE_DIR_WAS_SET=1
 [[ -n "${USER_BACKUP_ROOT+x}" ]] && USER_BACKUP_ROOT_WAS_SET=1
 [[ -n "${MCMOJAVE_CURSORS_DIR+x}" ]] && MCMOJAVE_CURSORS_DIR_WAS_SET=1
-[[ -n "${SLEEK_GRUB_THEME_DIR+x}" ]] && SLEEK_GRUB_THEME_DIR_WAS_SET=1
 CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
 CONFIG_REPO_DIR="${CONFIG_REPO_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri}"
 CONFIG_SOURCE_DIR="${CONFIG_SOURCE_DIR:-}"
@@ -33,7 +31,6 @@ SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
 ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
 ENABLE_POLARIS_LINGER="${ENABLE_POLARIS_LINGER:-1}"
 CONFIGURE_PLYMOUTH="${CONFIGURE_PLYMOUTH:-1}"
-CONFIGURE_GRUB_THEME="${CONFIGURE_GRUB_THEME:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 NOCTALIA_COPR="${NOCTALIA_COPR:-lionheartp/Hyprland}"
 NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
@@ -44,11 +41,6 @@ MCMOJAVE_CURSORS_REPO="${MCMOJAVE_CURSORS_REPO:-https://github.com/vinceliuice/M
 MCMOJAVE_CURSORS_DIR="${MCMOJAVE_CURSORS_DIR:-$HOME/.cache/fedora-niri-setup/McMojave-cursors}"
 MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
 POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
-SLEEK_GRUB_THEME_REPO="${SLEEK_GRUB_THEME_REPO:-$CONFIG_REPO_URL}"
-SLEEK_GRUB_THEME_BRANCH="${SLEEK_GRUB_THEME_BRANCH:-$CONFIG_REPO_BRANCH}"
-SLEEK_GRUB_THEME_DIR="${SLEEK_GRUB_THEME_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri-grub-theme}"
-SLEEK_GRUB_THEME_SOURCE_SUBDIR="${SLEEK_GRUB_THEME_SOURCE_SUBDIR:-grub/sleek-dark}"
-SLEEK_GRUB_THEME_TARGET="${SLEEK_GRUB_THEME_TARGET:-/boot/grub2/themes/sleek}"
 GRUB_GFXMODE="${GRUB_GFXMODE:-3440x1440,2560x1440,1920x1080,auto}"
 GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
 GRUB_CONFIG_FILE="${GRUB_CONFIG_FILE:-/etc/default/grub}"
@@ -253,10 +245,6 @@ resolve_target_user() {
 
   if [[ "$MCMOJAVE_CURSORS_DIR_WAS_SET" == "0" ]]; then
     MCMOJAVE_CURSORS_DIR="$TARGET_HOME/.cache/fedora-niri-setup/McMojave-cursors"
-  fi
-
-  if [[ "$SLEEK_GRUB_THEME_DIR_WAS_SET" == "0" ]]; then
-    SLEEK_GRUB_THEME_DIR="$TARGET_HOME/.cache/fedora-niri-setup/linux-niri-grub-theme"
   fi
 
   log "Target user: $TARGET_USER"
@@ -636,92 +624,6 @@ configure_polaris_autostart() {
   fi
 }
 
-find_sleek_dark_grub_theme_dir() {
-  local configured_dir="$SLEEK_GRUB_THEME_DIR/$SLEEK_GRUB_THEME_SOURCE_SUBDIR"
-  local theme_file
-  local lower_theme_file
-  local fallback_dir=""
-
-  if [[ -f "$configured_dir/theme.txt" ]]; then
-    printf '%s\n' "$configured_dir"
-    return 0
-  fi
-
-  while IFS= read -r theme_file; do
-    [[ -n "$theme_file" ]] || continue
-    lower_theme_file="${theme_file,,}"
-    if [[ "$lower_theme_file" == *dark* ]]; then
-      dirname "$theme_file"
-      return 0
-    fi
-    [[ -n "$fallback_dir" ]] || fallback_dir="$(dirname "$theme_file")"
-  done < <(find "$SLEEK_GRUB_THEME_DIR" -maxdepth 4 -type f -name theme.txt -print 2>/dev/null | sort)
-
-  [[ -n "$fallback_dir" ]] || return 1
-  printf '%s\n' "$fallback_dir"
-}
-
-resolve_grub_theme_payload_dir() {
-  local source_dir="$1"
-
-  if [[ -f "$source_dir/theme.txt" ]]; then
-    printf '%s\n' "$source_dir"
-    return 0
-  fi
-
-  if [[ -f "$source_dir/sleek/theme.txt" ]]; then
-    printf '%s\n' "$source_dir/sleek"
-    return 0
-  fi
-
-  return 1
-}
-
-install_grub_theme() {
-  [[ "$CONFIGURE_GRUB_THEME" == "1" ]] || {
-    log "GRUB theme configuration is disabled."
-    return 0
-  }
-
-  clone_or_update_git_repo "$SLEEK_GRUB_THEME_REPO" "$SLEEK_GRUB_THEME_DIR" "$SLEEK_GRUB_THEME_BRANCH"
-
-  local source_dir
-  local payload_dir
-  if ! source_dir="$(find_sleek_dark_grub_theme_dir)"; then
-    warn "No Sleek GRUB theme.txt file was found in $SLEEK_GRUB_THEME_DIR."
-    return 0
-  fi
-
-  if ! payload_dir="$(resolve_grub_theme_payload_dir "$source_dir")"; then
-    warn "Sleek GRUB theme source $source_dir does not contain theme.txt or sleek/theme.txt."
-    return 0
-  fi
-
-  case "$SLEEK_GRUB_THEME_TARGET" in
-    /boot/grub2/themes/*|/boot/grub/themes/*) ;;
-    *) die "Refusing to install GRUB theme outside a GRUB themes directory: $SLEEK_GRUB_THEME_TARGET" ;;
-  esac
-
-  backup_system_path "$SLEEK_GRUB_THEME_TARGET"
-  run_sudo rm -rf -- "$SLEEK_GRUB_THEME_TARGET"
-  run_sudo install -d -m 0755 "$SLEEK_GRUB_THEME_TARGET"
-
-  local theme_archive
-  theme_archive="$(mktemp)"
-  tar -C "$payload_dir" -cf "$theme_archive" .
-  run_sudo tar -C "$SLEEK_GRUB_THEME_TARGET" -xf "$theme_archive"
-  run_sudo chown -R root:root "$SLEEK_GRUB_THEME_TARGET"
-  rm -f "$theme_archive"
-
-  if ! run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
-    warn "Sleek GRUB theme copy finished, but $SLEEK_GRUB_THEME_TARGET/theme.txt is missing."
-    run_sudo find "$SLEEK_GRUB_THEME_TARGET" -maxdepth 2 -type f -print 2>/dev/null || true
-    return 0
-  fi
-
-  record_change "Installed Sleek GRUB theme from $payload_dir to $SLEEK_GRUB_THEME_TARGET."
-}
-
 upsert_grub_default() {
   local key="$1"
   local value="$2"
@@ -762,56 +664,31 @@ regenerate_grub_config() {
   fi
 }
 
-verify_grub_theme_config() {
-  [[ "$CONFIGURE_GRUB_THEME" == "1" ]] || return 0
-
-  if ! run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
-    warn "GRUB theme file is missing after install: $SLEEK_GRUB_THEME_TARGET/theme.txt"
-    return 0
-  fi
-
-  if run_sudo test -f "$GRUB_CONFIG_FILE" && ! run_sudo grep -Fq "GRUB_THEME=\"$SLEEK_GRUB_THEME_TARGET/theme.txt\"" "$GRUB_CONFIG_FILE"; then
-    warn "$GRUB_CONFIG_FILE does not contain the expected GRUB_THEME path."
-  fi
-
-  if run_sudo test -f "$GRUB_MKCONFIG_OUTPUT" && ! run_sudo grep -Fq "$(basename "$SLEEK_GRUB_THEME_TARGET")/theme.txt" "$GRUB_MKCONFIG_OUTPUT"; then
-    warn "$GRUB_MKCONFIG_OUTPUT does not reference the Sleek theme. Re-run grub2-mkconfig manually and check GRUB errors."
-  fi
-}
-
 configure_plymouth_and_grub() {
-  [[ "$CONFIGURE_PLYMOUTH" == "1" || "$CONFIGURE_GRUB_THEME" == "1" ]] || return 0
+  [[ "$CONFIGURE_PLYMOUTH" == "1" ]] || return 0
 
-  if [[ "$CONFIGURE_PLYMOUTH" == "1" ]]; then
-    log "Installing and configuring Plymouth spinner theme."
-    dnf_install_best_effort plymouth plymouth-plugin-spinner plymouth-system-theme grubby
+  log "Installing and configuring Plymouth spinner theme."
+  dnf_install_best_effort plymouth plymouth-plugin-spinner plymouth-system-theme grubby
 
-    if have_command plymouth-set-default-theme; then
-      run_sudo plymouth-set-default-theme -R spinner
-      record_change "Configured Plymouth spinner theme."
-    else
-      warn "plymouth-set-default-theme was not found; Plymouth theme was not changed."
-    fi
-
-    if have_command grubby; then
-      run_sudo grubby --update-kernel=ALL --args="rhgb quiet splash" || warn "Could not add Plymouth kernel arguments with grubby."
-    else
-      warn "grubby was not found; kernel arguments were not updated."
-    fi
+  if have_command plymouth-set-default-theme; then
+    run_sudo plymouth-set-default-theme -R spinner
+    record_change "Configured Plymouth spinner theme."
+  else
+    warn "plymouth-set-default-theme was not found; Plymouth theme was not changed."
   fi
 
-  install_grub_theme
+  if have_command grubby; then
+    run_sudo grubby --update-kernel=ALL --args="rhgb quiet splash" || warn "Could not add Plymouth kernel arguments with grubby."
+  else
+    warn "grubby was not found; kernel arguments were not updated."
+  fi
 
   upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
   upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
   upsert_grub_default GRUB_GFXMODE "\"$GRUB_GFXMODE\""
   upsert_grub_default GRUB_TERMINAL_OUTPUT "\"gfxterm\""
-  if [[ "$CONFIGURE_GRUB_THEME" == "1" ]] && run_sudo test -f "$SLEEK_GRUB_THEME_TARGET/theme.txt"; then
-    upsert_grub_default GRUB_THEME "\"$SLEEK_GRUB_THEME_TARGET/theme.txt\""
-  fi
 
   regenerate_grub_config
-  verify_grub_theme_config
   record_change "Configured GRUB timeout to $GRUB_TIMEOUT_SECONDS seconds."
 }
 
