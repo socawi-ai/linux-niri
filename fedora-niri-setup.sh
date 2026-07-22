@@ -1476,7 +1476,9 @@ refind_check_deps() {
 
 refind_detect_esp() {
   local esp="" fstype dev candidate
+  local esp_type_guid="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
 
+  # 1. Well-known mountpoints first.
   for candidate in /boot/efi /efi /boot; do
     if mountpoint -q "$candidate" 2>/dev/null; then
       fstype="$(findmnt -n -o FSTYPE "$candidate" 2>/dev/null || true)"
@@ -1487,17 +1489,42 @@ refind_detect_esp() {
     fi
   done
 
+  # 2. Any mounted vfat filesystem that looks like an ESP (has an EFI/ dir).
   if [[ -z "$esp" ]]; then
     local target
     while IFS= read -r target; do
-      if [[ -d "${target}/EFI" ]]; then
+      [[ -n "$target" ]] || continue
+      if [[ -d "${target}/EFI" || -d "${target}/efi" ]]; then
         esp="$target"
         break
       fi
-    done < <(findmnt -n -o TARGET --types vfat 2>/dev/null || true)
+    done < <(findmnt -rn -o TARGET --types vfat 2>/dev/null || true)
   fi
 
-  [[ -n "$esp" ]] || die "Cannot detect EFI System Partition. Ensure it is mounted (vfat) and re-run."
+  # 3. GPT partition-type GUID fallback — identifies the ESP even if it's
+  #    mounted somewhere unusual, and tells us if it exists but is unmounted.
+  if [[ -z "$esp" ]]; then
+    local esp_part esp_mount
+    esp_part="$(lsblk -rno NAME,PARTTYPE 2>/dev/null | awk -v guid="$esp_type_guid" 'tolower($2) == guid {print $1; exit}')"
+    if [[ -n "$esp_part" ]]; then
+      esp_mount="$(lsblk -rno MOUNTPOINT "/dev/${esp_part}" 2>/dev/null | head -1)"
+      if [[ -n "$esp_mount" ]]; then
+        esp="$esp_mount"
+      else
+        die "Found an EFI System Partition (/dev/${esp_part}, by GPT type GUID) but it is not mounted. Mount it (e.g. 'sudo mount /dev/${esp_part} /boot/efi') and re-run."
+      fi
+    fi
+  fi
+
+  if [[ -z "$esp" ]]; then
+    warn "ESP detection failed. Diagnostics:"
+    warn "  Mounted vfat filesystems:"
+    findmnt -rn -o TARGET,SOURCE,FSTYPE --types vfat 2>/dev/null | sed 's/^/    /' >&2 || true
+    warn "  Partitions with GPT type GUID ${esp_type_guid}: (none matched)"
+    warn "  All partitions (NAME, PARTTYPE, FSTYPE, MOUNTPOINTS):"
+    lsblk -o NAME,PARTTYPE,FSTYPE,MOUNTPOINTS 2>/dev/null | sed 's/^/    /' >&2 || true
+    die "Cannot detect EFI System Partition. Ensure it is mounted (vfat) and re-run."
+  fi
   _REFIND_ESP="$esp"
 
   dev="$(findmnt -n -o SOURCE "$esp" 2>/dev/null || true)"
@@ -1505,8 +1532,10 @@ refind_detect_esp() {
   dev="$(realpath "$dev" 2>/dev/null || printf '%s' "$dev")"
 
   local pkname partnum
-  pkname="$(lsblk -ndo PKNAME "$dev" 2>/dev/null | head -1 || true)"
-  partnum="$(lsblk -ndo PARTN "$dev" 2>/dev/null | head -1 || true)"
+  pkname="$(lsblk -rndo PKNAME "$dev" 2>/dev/null | head -1 || true)"
+  partnum="$(lsblk -rndo PARTN "$dev" 2>/dev/null | head -1 || true)"
+  pkname="${pkname//[[:space:]]/}"
+  partnum="${partnum//[[:space:]]/}"
 
   if [[ -n "$pkname" && -n "$partnum" ]]; then
     _REFIND_ESP_DISK="/dev/$pkname"
