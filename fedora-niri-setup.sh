@@ -321,6 +321,33 @@ replace_user_path_with_dir() {
   record_change "Installed $(basename "$dest") config to $dest."
 }
 
+merge_user_path_into_dir() {
+  # Like replace_user_path_with_dir, but overlays files from $src into $dest
+  # instead of wiping $dest first. Use this for directories that mix
+  # declarative config with an app's own runtime state (logs, caches,
+  # databases, lock files) — a wholesale rm -rf would destroy that state.
+  local src="$1"
+  local dest="$2"
+  [[ -d "$src" ]] || die "Expected directory $src."
+
+  case "$dest" in
+    "$TARGET_HOME"/*) ;;
+    *) die "Refusing to write path outside target home: $dest" ;;
+  esac
+
+  run_as_user mkdir -p "$dest"
+
+  local f rel
+  while IFS= read -r -d '' f; do
+    rel="${f#"$src"/}"
+    backup_user_path "$dest/$rel"
+    run_as_user mkdir -p "$(dirname "$dest/$rel")"
+    run_as_user cp -a "$f" "$dest/$rel"
+  done < <(find "$src" -type f -print0)
+
+  record_change "Merged $(basename "$dest") config into $dest (existing files preserved)."
+}
+
 safe_rm_rf() {
   local path="$1"
   [[ -n "$path" && "$path" != "/" ]] || die "Refusing to remove unsafe path: $path"
@@ -954,7 +981,10 @@ install_user_configs() {
   log "Installing repo configs and overwriting existing target config directories."
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/alacritty" "$TARGET_HOME/.config/alacritty"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/niri" "$TARGET_HOME/.config/niri"
-  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/polaris" "$TARGET_HOME/.config/polaris"
+  # Not a replace: ~/.config/polaris also holds Polaris's own runtime state
+  # (logs, device/app caches, polaris_state.json) alongside polaris.conf —
+  # wiping the directory would destroy that state.
+  merge_user_path_into_dir "$CONFIG_SOURCE_DIR/polaris" "$TARGET_HOME/.config/polaris"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/noctalia" "$TARGET_HOME/$NOCTALIA_CONFIG_RELATIVE_DIR"
 }
 
