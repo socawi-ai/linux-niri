@@ -14,7 +14,7 @@ CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
 CONFIG_REPO_DIR="${CONFIG_REPO_DIR:-$HOME/.cache/fedora-niri-setup/linux-niri}"
 CONFIG_SOURCE_DIR="${CONFIG_SOURCE_DIR:-}"
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-$USER}}"
-ASSUME_YES="${ASSUME_YES:-0}"
+ASSUME_YES="${ASSUME_YES:-1}"
 EXTRA_FEDORA_PACKAGES="${EXTRA_FEDORA_PACKAGES:-}"
 DNF_SKIP_UNAVAILABLE="${DNF_SKIP_UNAVAILABLE:-1}"
 
@@ -489,6 +489,7 @@ install_fedora_packages() {
     rpm-build
     curl
     git
+    git-lfs
     gh
     tar
     xz
@@ -737,6 +738,12 @@ clone_or_update_git_repo() {
   local repo_dir="$2"
   local branch="${3:-}"
 
+  # Registers git-lfs's smudge/clean filters for $TARGET_USER so any
+  # LFS-tracked files (e.g. this repo's wallpapers/) are actually downloaded
+  # on clone/checkout instead of left as pointer stubs. Idempotent, and a
+  # harmless no-op for repos that don't use LFS at all.
+  have_command git-lfs && run_as_user git lfs install
+
   run_as_user mkdir -p "$(dirname "$repo_dir")"
 
   if [[ -d "$repo_dir/.git" ]]; then
@@ -778,6 +785,11 @@ clone_or_update_git_repo() {
       run_as_user git clone "$repo_url" "$repo_dir"
     fi
   fi
+
+  # Belt-and-suspenders: the smudge filter registered above should already
+  # materialize LFS content during the clone/checkout/reset above, but an
+  # explicit pull removes any doubt. No-op for repos with no LFS tracking.
+  have_command git-lfs && run_as_user git -C "$repo_dir" lfs pull
 }
 
 install_mcmojave_cursors() {
