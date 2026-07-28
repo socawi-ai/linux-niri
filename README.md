@@ -7,34 +7,12 @@ are prepared to repair.
 
 Run as your normal user, not with `sudo`. The script asks for sudo when needed.
 
-## Quick install
-
-For a terminal-only machine (SSH session, bare TTY console — no browser
-needed), run directly from GitHub with no manual download step:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-niri-setup.sh | bash
-```
-
-Then, once the desktop is set up and you're ready for the boot manager:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh | bash
-```
-
-This form works the same in fish, zsh, or bash as your login shell — no
-process substitution (`<(...)`) involved, which fish doesn't support without
-its own `psub` command. Both scripts read their yes/no prompts from
-`/dev/tty` directly rather than stdin, so piping through `curl | bash` this
-way is safe — it doesn't swallow the prompts.
-
-Fully unattended (no prompts at all, e.g. over SSH). Using `env` here instead
-of a bare `VAR=val` prefix, since fish doesn't support that prefix form:
-
-```bash
-env TARGET_USER=your-user ASSUME_YES=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-niri-setup.sh)"
-env ASSUME_YES=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/refind-migrate.sh)"
-```
+Both scripts below work the same on a terminal-only machine (SSH session,
+bare TTY console — no browser needed) as they do in a desktop terminal:
+download the script, mark it executable, then run it. This works the same in
+fish, zsh, or bash as your login shell, and both scripts read their yes/no
+prompts from `/dev/tty` directly rather than stdin, so it's safe to run over
+SSH.
 
 ## Fedora
 
