@@ -16,7 +16,7 @@ workspace "Games"
 
     cursor {
         xcursor-theme "McMojave-cursors"
-        xcursor-size 16
+        xcursor-size 24
 }
 
     debug {
