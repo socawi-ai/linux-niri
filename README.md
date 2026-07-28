@@ -54,9 +54,9 @@ env ASSUME_YES=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/socawi-
 - GTK/Qt Wayland support
 - McMojave cursors
 - Nautilus Open Any Terminal, set to Alacritty
+- LACT, with the `lactd` service enabled, for AMD/Nvidia/Intel GPU control
 - VS Code
 - Steam from RPM Fusion, not Flatpak
-- LSFG-VK
 - Polaris with host setup and user-service autostart
 - Plymouth spinner
 - GRUB timeout

@@ -26,6 +26,8 @@ INSTALL_STEAM="${INSTALL_STEAM:-1}"
 INSTALL_VSCODE="${INSTALL_VSCODE:-1}"
 INSTALL_MCMOJAVE_CURSORS="${INSTALL_MCMOJAVE_CURSORS:-1}"
 INSTALL_NAUTILUS_OPEN_ANY_TERMINAL="${INSTALL_NAUTILUS_OPEN_ANY_TERMINAL:-1}"
+INSTALL_LACT="${INSTALL_LACT:-1}"
+ENABLE_LACT_SERVICE="${ENABLE_LACT_SERVICE:-1}"
 INSTALL_POLARIS="${INSTALL_POLARIS:-1}"
 SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
 ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
@@ -37,6 +39,8 @@ NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
 NOCTALIA_GREETER_PACKAGE="${NOCTALIA_GREETER_PACKAGE:-noctalia-greeter}"
 NAUTILUS_OPEN_ANY_TERMINAL_COPR="${NAUTILUS_OPEN_ANY_TERMINAL_COPR:-monkeygold/nautilus-open-any-terminal}"
 NAUTILUS_TERMINAL="${NAUTILUS_TERMINAL:-alacritty}"
+LACT_COPR="${LACT_COPR:-ilyaz/LACT}"
+LACT_PACKAGE="${LACT_PACKAGE:-lact}"
 MCMOJAVE_CURSORS_REPO="${MCMOJAVE_CURSORS_REPO:-https://github.com/vinceliuice/McMojave-cursors}"
 MCMOJAVE_CURSORS_DIR="${MCMOJAVE_CURSORS_DIR:-$HOME/.cache/fedora-niri-setup/McMojave-cursors}"
 MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
@@ -344,23 +348,6 @@ write_user_file() {
   chmod 0644 "$tmp"
   run_as_user install -D -m "$mode" "$tmp" "$path"
   rm -f "$tmp"
-}
-
-replace_user_file() {
-  local src="$1"
-  local dest="$2"
-  [[ -f "$src" ]] || die "Expected file $src."
-
-  case "$dest" in
-    "$TARGET_HOME"/*) ;;
-    *) die "Refusing to replace path outside target home: $dest" ;;
-  esac
-
-  backup_user_path "$dest"
-  run_as_user rm -f "$dest"
-  run_as_user mkdir -p "$(dirname "$dest")"
-  run_as_user cp -a "$src" "$dest"
-  record_change "Installed file $dest from $src."
 }
 
 write_system_file() {
@@ -819,12 +806,32 @@ configure_nautilus_open_any_terminal() {
   fi
 }
 
-github_latest_asset_url() {
-  local api_url="$1"
-  local asset_regex="$2"
+install_lact() {
+  [[ "$INSTALL_LACT" == "1" ]] || {
+    log "LACT installation is disabled."
+    return 0
+  }
 
-  curl -fsSL "$api_url" |
-    awk -F'"' -v regex="$asset_regex" '$2 == "browser_download_url" && $4 ~ regex { print $4; exit }'
+  if ! enable_copr_repo "$LACT_COPR" "LACT"; then
+    warn "Could not enable LACT COPR."
+    return 0
+  fi
+
+  if ! dnf_install_optional "$LACT_PACKAGE"; then
+    return 0
+  fi
+  record_change "Installed LACT ($LACT_PACKAGE) for AMD/Nvidia/Intel GPU control."
+
+  [[ "$ENABLE_LACT_SERVICE" == "1" ]] || {
+    log "LACT service (lactd) autostart is disabled."
+    return 0
+  }
+
+  if run_sudo systemctl enable --now lactd.service; then
+    record_change "Enabled and started the lactd service."
+  else
+    warn "Could not enable and start lactd.service."
+  fi
 }
 
 download_as_user() {
@@ -834,7 +841,6 @@ download_as_user() {
   run_as_user mkdir -p "$(dirname "$dest")"
   run_as_user curl -fL "$url" -o "$dest"
 }
-
 
 install_polaris() {
   [[ "$INSTALL_POLARIS" == "1" ]] || {
@@ -885,6 +891,7 @@ install_default_apps() {
   install_steam
   install_mcmojave_cursors
   install_nautilus_open_any_terminal
+  install_lact
   install_polaris
 }
 
