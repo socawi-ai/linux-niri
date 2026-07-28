@@ -939,6 +939,7 @@ verify_config_source() {
   local missing=()
   [[ -d "$CONFIG_SOURCE_DIR/alacritty" ]] || missing+=("alacritty/")
   [[ -d "$CONFIG_SOURCE_DIR/niri" ]] || missing+=("niri/")
+  [[ -d "$CONFIG_SOURCE_DIR/polaris" ]] || missing+=("polaris/")
   [[ -f "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" ]] || missing+=("noctalia/$NOCTALIA_CONFIG_FILE")
   [[ -d "$CONFIG_SOURCE_DIR/wallpapers" ]] || missing+=("wallpapers/")
 
@@ -946,13 +947,14 @@ verify_config_source() {
     die "Config source $CONFIG_SOURCE_DIR is missing required content: ${missing[*]}"
   fi
 
-  log "Verified config source contains alacritty/, niri/, noctalia/$NOCTALIA_CONFIG_FILE, and wallpapers/."
+  log "Verified config source contains alacritty/, niri/, polaris/, noctalia/$NOCTALIA_CONFIG_FILE, and wallpapers/."
 }
 
 install_user_configs() {
   log "Installing repo configs and overwriting existing target config directories."
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/alacritty" "$TARGET_HOME/.config/alacritty"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/niri" "$TARGET_HOME/.config/niri"
+  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/polaris" "$TARGET_HOME/.config/polaris"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/noctalia" "$TARGET_HOME/$NOCTALIA_CONFIG_RELATIVE_DIR"
 }
 

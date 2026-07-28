@@ -43,6 +43,7 @@ It also downloads this repo's configs and wallpapers:
 
 - `alacritty/` -> `~/.config/alacritty`
 - `niri/` -> `~/.config/niri`
+- `polaris/` -> `~/.config/polaris`
 - `noctalia/` -> `~/.local/state/noctalia`
 - `wallpapers/` -> the user's localized pictures folder
 
