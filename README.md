@@ -86,9 +86,12 @@ preconfigured (e.g. via `archinstall`):
   `/boot/efi`, `/efi`, and any mounted vfat filesystem (or `REFIND_CONF_PATH`
   if set explicitly), the theme is cloned into `themes/rEFInd-nils` next to
   it, and a matching `include` line is appended to `refind.conf` if not
-  already present. Skipped gracefully if `refind.conf` can't be found (e.g.
-  a different bootloader is in use) — set `INSTALL_REFIND_THEME=0` to
-  disable it outright.
+  already present. If not on UKI, it also copies the theme's
+  `icons/os_arch.png` to `/boot/.VolumeIcon.png` — the file rEFInd looks for
+  to show a proper Arch icon on loose-kernel (non-UKI) boot entries, rather
+  than a generic Linux icon. Skipped gracefully if `refind.conf` can't be
+  found (e.g. a different bootloader is in use) — set `INSTALL_REFIND_THEME=0`
+  to disable it outright.
 
 An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
 is bootstrapped automatically from the AUR itself if not already installed.

@@ -49,6 +49,13 @@ REFIND_THEME_DIR="${REFIND_THEME_DIR:-$HOME/.cache/arch-niri-setup/refind-theme}
 # Explicit override if find_refind_conf() can't locate refind.conf on its own
 # (unusual ESP mount point or layout).
 REFIND_CONF_PATH="${REFIND_CONF_PATH:-}"
+# On a non-UKI setup, rEFInd's loose-kernel scan (vmlinuz found directly in
+# /boot rather than a bootloader-binary directory) only picks up a
+# distro-specific icon if this exact file is present — otherwise it falls
+# back to a generic Linux icon. Harmless no-op if you're on UKI, since there's
+# no loose-kernel entry for it to apply to.
+REFIND_VOLUME_ICON_SOURCE="${REFIND_VOLUME_ICON_SOURCE:-icons/os_arch.png}"
+REFIND_VOLUME_ICON_DEST="${REFIND_VOLUME_ICON_DEST:-/boot/.VolumeIcon.png}"
 
 # Noctalia is installed from the AUR (there is no COPR equivalent). This
 # mirrors the Fedora script's choice of the bleeding-edge "-git" build over
@@ -63,7 +70,7 @@ VSCODE_PACKAGE="${VSCODE_PACKAGE:-visual-studio-code-bin}"
 LACT_PACKAGE="${LACT_PACKAGE:-lact}"
 MCMOJAVE_CURSORS_REPO="${MCMOJAVE_CURSORS_REPO:-https://github.com/vinceliuice/McMojave-cursors}"
 MCMOJAVE_CURSORS_DIR="${MCMOJAVE_CURSORS_DIR:-$HOME/.cache/arch-niri-setup/McMojave-cursors}"
-MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
+MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-Mc/Mojave-cursors}"
 POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
 
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
@@ -837,6 +844,17 @@ install_refind_theme() {
 
   log "Installed rEFInd theme '$REFIND_THEME_NAME' to $theme_dest."
   record_change "Installed rEFInd theme '$REFIND_THEME_NAME' from $REFIND_THEME_REPO."
+
+  local icon_src="$theme_dest/$REFIND_VOLUME_ICON_SOURCE"
+  if run_sudo test -f "$icon_src"; then
+    backup_system_path "$REFIND_VOLUME_ICON_DEST"
+    run_sudo install -d -m 0755 "$(dirname "$REFIND_VOLUME_ICON_DEST")"
+    run_sudo cp "$icon_src" "$REFIND_VOLUME_ICON_DEST"
+    log "Installed rEFInd volume icon to $REFIND_VOLUME_ICON_DEST."
+    record_change "Set $REFIND_VOLUME_ICON_DEST from the theme's $REFIND_VOLUME_ICON_SOURCE."
+  else
+    warn "$icon_src not found in the theme; skipping the rEFInd volume icon (loose-kernel boot entries will keep a generic icon)."
+  fi
 
   if run_sudo grep -qE "^include[[:space:]]+themes/${REFIND_THEME_NAME}/theme\.conf[[:space:]]*\$" "$refind_conf"; then
     log "Theme already included in $refind_conf."
