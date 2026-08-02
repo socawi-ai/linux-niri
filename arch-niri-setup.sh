@@ -725,7 +725,46 @@ install_limine_snapshot_boot() {
 
   ensure_limine_snapshots_placeholder "$found_conf"
 
+  # We already know exactly where limine.conf lives — configure
+  # limine-snapper-sync to use that ESP mountpoint directly instead of
+  # making it re-run its own auto-detection at every sync.
+  local esp_path
+  esp_path="$(findmnt -T "$found_conf" -n -o TARGET 2>/dev/null || true)"
+  if [[ -n "$esp_path" ]]; then
+    upsert_conf_key /etc/limine-snapper-sync.conf ESP_PATH "$esp_path"
+    record_change "Configured limine-snapper-sync ESP_PATH=$esp_path in /etc/limine-snapper-sync.conf."
+  else
+    warn "Could not determine the mountpoint backing $found_conf; leaving ESP_PATH to limine-snapper-sync's own auto-detection."
+  fi
+
   run_sudo limine-snapper-sync || warn "limine-snapper-sync did not complete cleanly on this first run — this is expected if no snapshots exist yet."
+}
+
+upsert_conf_key() {
+  # Idempotently sets KEY="value" in a simple KEY="value" style config file,
+  # preserving all other lines. Creates the file if it doesn't exist yet.
+  local path="$1" key="$2" value="$3"
+  local tmp
+
+  run_sudo test -f "$path" || write_system_file "$path" 0644 </dev/null
+  backup_system_path "$path"
+
+  tmp="$(mktemp)"
+  run_sudo awk -v key="$key" -v value="$value" '
+    BEGIN { replaced = 0 }
+    $0 ~ "^[[:space:]]*#?[[:space:]]*" key "=" {
+      print key "=\"" value "\""
+      replaced = 1
+      next
+    }
+    { print }
+    END {
+      if (!replaced) print key "=\"" value "\""
+    }
+  ' "$path" >"$tmp"
+
+  run_sudo install -m 0644 "$tmp" "$path"
+  rm -f "$tmp"
 }
 
 ensure_limine_snapshots_placeholder() {

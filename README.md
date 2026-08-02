@@ -84,7 +84,9 @@ to pacman/AUR and an already-installed Limine bootloader:
   gracefully if Snapper + btrfs aren't already set up. If `limine.conf` is
   missing the `/Snapshots` placeholder `limine-snapper-sync` needs, the
   script backs it up and appends a top-level `/Snapshots` block (safe —
-  doesn't touch any existing entry) rather than leaving it broken.
+  doesn't touch any existing entry) rather than leaving it broken. It also
+  writes the confirmed ESP mountpoint into `/etc/limine-snapper-sync.conf`
+  as `ESP_PATH`, instead of leaving that to the tool's own auto-detection.
 
 An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
 is bootstrapped automatically from the AUR itself if not already installed.
