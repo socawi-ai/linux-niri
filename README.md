@@ -92,6 +92,11 @@ preconfigured (e.g. via `archinstall`):
   than a generic Linux icon. Skipped gracefully if `refind.conf` can't be
   found (e.g. a different bootloader is in use) — set `INSTALL_REFIND_THEME=0`
   to disable it outright.
+- `nowatchdog` added to every boot option line in `/boot/refind_linux.conf`
+  (non-UKI rEFInd only), suppressing the harmless but noisy "watchdog did not
+  stop" shutdown warning some hardware watchdog chips produce. This is a
+  hardware-specific tweak, not a universal need — set
+  `DISABLE_HARDWARE_WATCHDOG=0` if your machine doesn't hit it.
 
 An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
 is bootstrapped automatically from the AUR itself if not already installed.

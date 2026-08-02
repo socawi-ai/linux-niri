@@ -57,6 +57,15 @@ REFIND_CONF_PATH="${REFIND_CONF_PATH:-}"
 REFIND_VOLUME_ICON_SOURCE="${REFIND_VOLUME_ICON_SOURCE:-icons/os_arch.png}"
 REFIND_VOLUME_ICON_DEST="${REFIND_VOLUME_ICON_DEST:-/boot/.VolumeIcon.png}"
 
+# Hardware-specific quirk, not a universal need: many boards' watchdog chips
+# (Intel iTCO_wdt, AMD sp5100_tco, etc.) can't be cleanly disarmed on
+# shutdown, so the kernel logs "watchdog did not stop!" every time — harmless
+# but noisy. Only applies to a non-UKI rEFInd setup, since that's where the
+# kernel cmdline lives in a plain-text refind_linux.conf. Set
+# DISABLE_HARDWARE_WATCHDOG=0 if your hardware doesn't hit this.
+DISABLE_HARDWARE_WATCHDOG="${DISABLE_HARDWARE_WATCHDOG:-1}"
+REFIND_LINUX_CONF_PATH="${REFIND_LINUX_CONF_PATH:-/boot/refind_linux.conf}"
+
 # Noctalia is installed from the AUR (there is no COPR equivalent). This
 # mirrors the Fedora script's choice of the bleeding-edge "-git" build over
 # the stable release.
@@ -872,6 +881,38 @@ install_refind_theme() {
   record_change "Enabled rEFInd theme '$REFIND_THEME_NAME' in $refind_conf."
 }
 
+disable_hardware_watchdog() {
+  [[ "$DISABLE_HARDWARE_WATCHDOG" == "1" ]] || {
+    log "Hardware watchdog disabling is disabled."
+    return 0
+  }
+
+  local path="$REFIND_LINUX_CONF_PATH"
+  run_sudo test -f "$path" || {
+    warn "$path not found; skipping the nowatchdog kernel parameter (only applies to a non-UKI rEFInd setup)."
+    return 0
+  }
+
+  if run_sudo grep -q 'nowatchdog' "$path"; then
+    log "nowatchdog already present in $path."
+    return 0
+  fi
+
+  backup_system_path "$path"
+  local tmp; tmp="$(mktemp)"
+  run_sudo awk '
+    /^"[^"]*"[[:space:]]+"[^"]*"[[:space:]]*$/ {
+      sub(/"[[:space:]]*$/, " nowatchdog\"")
+    }
+    { print }
+  ' "$path" >"$tmp"
+  run_sudo install -m 0644 "$tmp" "$path"
+  rm -f "$tmp"
+
+  log "Added nowatchdog to every boot option line in $path."
+  record_change "Added the nowatchdog kernel parameter to $path (suppresses a harmless 'watchdog did not stop' shutdown warning)."
+}
+
 install_nautilus_open_any_terminal() {
   [[ "$INSTALL_NAUTILUS_OPEN_ANY_TERMINAL" == "1" ]] || {
     log "Nautilus Open Any Terminal installation is disabled."
@@ -1414,8 +1455,9 @@ main() {
   section "Default apps"
   install_default_apps
 
-  section "rEFInd theme"
+  section "rEFInd"
   install_refind_theme
+  disable_hardware_watchdog
 
   section "Noctalia"
   install_noctalia_packages
