@@ -81,15 +81,18 @@ to pacman/AUR and an already-installed Limine bootloader:
 - Automatic pre/post Snapper snapshots on every pacman transaction
   (`snap-pac`), and Snapper snapshots exposed as bootable Limine menu
   entries (`limine-snapper-sync`) — both optional, and both skipped
-  gracefully if Snapper + btrfs aren't already set up
+  gracefully if Snapper + btrfs aren't already set up. If `limine.conf` is
+  missing the `/Snapshots` placeholder `limine-snapper-sync` needs, the
+  script backs it up and appends a top-level `/Snapshots` block (safe —
+  doesn't touch any existing entry) rather than leaving it broken.
 
 An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
 is bootstrapped automatically from the AUR itself if not already installed.
 
-This script never installs, configures, or touches Limine or Plymouth —
-Limine is assumed already installed and preconfigured (e.g. via
-`archinstall`), which is also assumed to already own boot splash. It also
-never runs `mkinitcpio` HOOKS/config changes for the same reason.
+Limine itself is otherwise assumed already installed and preconfigured (e.g.
+via `archinstall`), which is also assumed to already own boot splash —
+Plymouth, `mkinitcpio` HOOKS, and kernel-cmdline changes are all out of
+scope for the same reason.
 
 It downloads the same repo configs and wallpapers as the Fedora script (see
 above).

@@ -715,10 +715,6 @@ install_limine_snapshot_boot() {
     warn "Could not enable limine-snapper-sync.service."
   fi
 
-  # This script never edits limine.conf's entry structure — only checks
-  # whether the snapshot placeholder limine-snapper-sync needs is already
-  # there, and tells you exactly what's missing rather than guessing at a
-  # hand-tuned boot config.
   local found_conf
   found_conf="$(find_limine_conf || true)"
 
@@ -727,11 +723,33 @@ install_limine_snapshot_boot() {
     return 0
   fi
 
-  if run_sudo grep -qE '^[[:space:]]*/{1,2}Snapshots[[:space:]]*$' "$found_conf"; then
-    log "Snapshots placeholder already present in $found_conf."
-  else
-    warn "$found_conf has no '//Snapshots' or '/Snapshots' placeholder yet. limine-snapper-sync cannot add snapshot boot entries until one is added manually inside your OS entry block (or as a top-level '/Snapshots' block) — this script does not edit limine.conf's entry structure automatically to avoid corrupting a hand-tuned boot config. See https://gitlab.com/Zesko/limine-snapper-sync for the exact syntax for your setup."
+  ensure_limine_snapshots_placeholder "$found_conf"
+
+  run_sudo limine-snapper-sync || warn "limine-snapper-sync did not complete cleanly on this first run — this is expected if no snapshots exist yet."
+}
+
+ensure_limine_snapshots_placeholder() {
+  # A top-level "/Snapshots" block is the safe option here: unlike the
+  # nested "//Snapshots" form (which has to go inside a specific OS entry
+  # block whose exact structure we don't know), a top-level block can be
+  # appended to the end of the file without touching any existing entry.
+  local path="$1"
+
+  if run_sudo grep -qE '^[[:space:]]*/{1,2}Snapshots[[:space:]]*$' "$path"; then
+    log "Snapshots placeholder already present in $path."
+    return 0
   fi
+
+  backup_system_path "$path"
+
+  local tmp; tmp="$(mktemp)"
+  run_sudo cat "$path" >"$tmp"
+  printf '\n/Snapshots\n' >>"$tmp"
+  run_sudo install -m 0644 "$tmp" "$path"
+  rm -f "$tmp"
+
+  log "Added a top-level '/Snapshots' placeholder to $path."
+  record_change "Added the '/Snapshots' boot-entry placeholder limine-snapper-sync needs to $path."
 }
 
 set_systemd_user_service() {
