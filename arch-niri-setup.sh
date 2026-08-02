@@ -36,16 +36,6 @@ ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
 ENABLE_POLARIS_LINGER="${ENABLE_POLARIS_LINGER:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 
-# Snapshot integration assumes Snapper + btrfs are already configured (same
-# "already preconfigured, don't set it up from scratch" stance as Limine
-# itself) — this only wires pacman and the bootloader up to it.
-ENABLE_PACMAN_SNAPSHOTS="${ENABLE_PACMAN_SNAPSHOTS:-1}"
-ENABLE_LIMINE_SNAPSHOT_BOOT="${ENABLE_LIMINE_SNAPSHOT_BOOT:-1}"
-SNAPPER_CONFIG_NAME="${SNAPPER_CONFIG_NAME:-root}"
-# Explicit override if find_limine_conf() can't locate limine.conf on its own
-# (unusual ESP mount point or layout).
-LIMINE_CONF_PATH="${LIMINE_CONF_PATH:-}"
-
 # Noctalia is installed from the AUR (there is no COPR equivalent). This
 # mirrors the Fedora script's choice of the bleeding-edge "-git" build over
 # the stable release.
@@ -107,7 +97,7 @@ else
   COLOR_DIM=""
 fi
 
-TOTAL_SECTIONS=9
+TOTAL_SECTIONS=8
 
 declare -a CHANGES=()
 declare -a WARNINGS=()
@@ -629,170 +619,6 @@ install_steam() {
   if pacman_install_optional steam; then
     record_change "Installed Steam."
   fi
-}
-
-snapper_prerequisites_ok() {
-  have_command snapper || {
-    warn "snapper was not found; skipping pacman/Limine snapshot integration."
-    return 1
-  }
-
-  local root_fstype
-  root_fstype="$(findmnt -n -o FSTYPE / 2>/dev/null || true)"
-  if [[ "$root_fstype" != "btrfs" ]]; then
-    warn "Root filesystem is not btrfs (detected: ${root_fstype:-unknown}); skipping pacman/Limine snapshot integration."
-    return 1
-  fi
-
-  if ! snapper list-configs 2>/dev/null | grep -qE "^${SNAPPER_CONFIG_NAME}[[:space:]]"; then
-    warn "No snapper config named '$SNAPPER_CONFIG_NAME' found; skipping pacman/Limine snapshot integration. Run 'sudo snapper -c $SNAPPER_CONFIG_NAME create-config /' first."
-    return 1
-  fi
-
-  return 0
-}
-
-install_pacman_snapshot_hooks() {
-  [[ "$ENABLE_PACMAN_SNAPSHOTS" == "1" ]] || {
-    log "Automatic pacman snapshots (snap-pac) are disabled."
-    return 0
-  }
-
-  snapper_prerequisites_ok || return 0
-
-  log "Installing snap-pac for automatic pre/post pacman snapshots."
-  if pacman_install_optional snap-pac; then
-    record_change "Installed snap-pac (automatic Snapper snapshots on every pacman transaction)."
-  fi
-}
-
-find_limine_conf() {
-  if [[ -n "$LIMINE_CONF_PATH" ]]; then
-    if run_sudo test -f "$LIMINE_CONF_PATH"; then
-      printf '%s\n' "$LIMINE_CONF_PATH"
-      return 0
-    fi
-    warn "LIMINE_CONF_PATH=$LIMINE_CONF_PATH does not exist; falling back to searching for it."
-  fi
-
-  # Search actual mount points rather than guessing a fixed list of paths —
-  # ESP layout varies a lot (mounted at /boot, /boot/efi, /efi, or elsewhere;
-  # limine.conf directly at the root or nested in limine/ or EFI/limine/).
-  local roots=(/boot /boot/efi /efi)
-  local vfat_target
-  while IFS= read -r vfat_target; do
-    [[ -n "$vfat_target" ]] || continue
-    roots+=("$vfat_target")
-  done < <(findmnt -rn -o TARGET --types vfat 2>/dev/null || true)
-
-  local root hit name
-  for name in limine.conf limine.cfg; do
-    for root in "${roots[@]}"; do
-      [[ -d "$root" ]] || continue
-      hit="$(run_sudo find "$root" -maxdepth 4 -iname "$name" 2>/dev/null | head -1)"
-      [[ -n "$hit" ]] && { printf '%s\n' "$hit"; return 0; }
-    done
-  done
-
-  return 1
-}
-
-install_limine_snapshot_boot() {
-  [[ "$ENABLE_LIMINE_SNAPSHOT_BOOT" == "1" ]] || {
-    log "Limine snapshot-boot integration is disabled."
-    return 0
-  }
-
-  snapper_prerequisites_ok || return 0
-
-  log "Installing limine-snapper-sync (AUR) to expose Snapper snapshots as Limine boot entries."
-  aur_install_optional limine-snapper-sync || return 0
-  record_change "Installed limine-snapper-sync."
-
-  if run_sudo systemctl enable --now limine-snapper-sync.service; then
-    record_change "Enabled limine-snapper-sync.service."
-  else
-    warn "Could not enable limine-snapper-sync.service."
-  fi
-
-  local found_conf
-  found_conf="$(find_limine_conf || true)"
-
-  if [[ -z "$found_conf" ]]; then
-    warn "Could not locate limine.conf (searched /boot, /boot/efi, /efi, and any mounted vfat filesystem) to check for a Snapshots placeholder. Set LIMINE_CONF_PATH to its exact location if it's somewhere unusual. limine-snapper-sync needs a '//Snapshots' (nested inside your OS entry) or '/Snapshots' (top-level) block added to it manually — see https://gitlab.com/Zesko/limine-snapper-sync for the exact syntax."
-    return 0
-  fi
-
-  ensure_limine_snapshots_placeholder "$found_conf"
-
-  # We already know exactly where limine.conf lives — configure
-  # limine-snapper-sync to use that ESP mountpoint directly instead of
-  # making it re-run its own auto-detection at every sync. This has to go
-  # in /etc/default/limine specifically: it's the tool's primary config
-  # file, and fully shadows /etc/limine-snapper-sync.conf if both exist —
-  # writing only to the latter silently does nothing when the former is
-  # already present (e.g. from an archinstall-managed Limine setup).
-  local esp_path
-  esp_path="$(findmnt -T "$found_conf" -n -o TARGET 2>/dev/null || true)"
-  if [[ -n "$esp_path" ]]; then
-    upsert_conf_key /etc/default/limine ESP_PATH "$esp_path"
-    record_change "Configured limine-snapper-sync ESP_PATH=$esp_path in /etc/default/limine."
-  else
-    warn "Could not determine the mountpoint backing $found_conf; leaving ESP_PATH to limine-snapper-sync's own auto-detection."
-  fi
-
-  run_sudo limine-snapper-sync || warn "limine-snapper-sync did not complete cleanly on this first run — this is expected if no snapshots exist yet."
-}
-
-upsert_conf_key() {
-  # Idempotently sets KEY="value" in a simple KEY="value" style config file,
-  # preserving all other lines. Creates the file if it doesn't exist yet.
-  local path="$1" key="$2" value="$3"
-  local tmp
-
-  run_sudo test -f "$path" || write_system_file "$path" 0644 </dev/null
-  backup_system_path "$path"
-
-  tmp="$(mktemp)"
-  run_sudo awk -v key="$key" -v value="$value" '
-    BEGIN { replaced = 0 }
-    $0 ~ "^[[:space:]]*#?[[:space:]]*" key "=" {
-      print key "=\"" value "\""
-      replaced = 1
-      next
-    }
-    { print }
-    END {
-      if (!replaced) print key "=\"" value "\""
-    }
-  ' "$path" >"$tmp"
-
-  run_sudo install -m 0644 "$tmp" "$path"
-  rm -f "$tmp"
-}
-
-ensure_limine_snapshots_placeholder() {
-  # A top-level "/Snapshots" block is the safe option here: unlike the
-  # nested "//Snapshots" form (which has to go inside a specific OS entry
-  # block whose exact structure we don't know), a top-level block can be
-  # appended to the end of the file without touching any existing entry.
-  local path="$1"
-
-  if run_sudo grep -qE '^[[:space:]]*/{1,2}Snapshots[[:space:]]*$' "$path"; then
-    log "Snapshots placeholder already present in $path."
-    return 0
-  fi
-
-  backup_system_path "$path"
-
-  local tmp; tmp="$(mktemp)"
-  run_sudo cat "$path" >"$tmp"
-  printf '\n/Snapshots\n' >>"$tmp"
-  run_sudo install -m 0644 "$tmp" "$path"
-  rm -f "$tmp"
-
-  log "Added a top-level '/Snapshots' placeholder to $path."
-  record_change "Added the '/Snapshots' boot-entry placeholder limine-snapper-sync needs to $path."
 }
 
 set_systemd_user_service() {
@@ -1462,10 +1288,6 @@ main() {
 
   section "Default apps"
   install_default_apps
-
-  section "Snapshots"
-  install_pacman_snapshot_hooks
-  install_limine_snapshot_boot
 
   section "Noctalia"
   install_noctalia_packages

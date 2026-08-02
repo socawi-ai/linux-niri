@@ -78,17 +78,6 @@ to pacman/AUR and an already-installed Limine bootloader:
 - VS Code (AUR, `visual-studio-code-bin`)
 - Steam, via the `multilib` repo (enabled automatically if needed)
 - Polaris with host setup and user-service autostart
-- Automatic pre/post Snapper snapshots on every pacman transaction
-  (`snap-pac`), and Snapper snapshots exposed as bootable Limine menu
-  entries (`limine-snapper-sync`) — both optional, and both skipped
-  gracefully if Snapper + btrfs aren't already set up. If `limine.conf` is
-  missing the `/Snapshots` placeholder `limine-snapper-sync` needs, the
-  script backs it up and appends a top-level `/Snapshots` block (safe —
-  doesn't touch any existing entry) rather than leaving it broken. It also
-  writes the confirmed ESP mountpoint into `/etc/default/limine` as
-  `ESP_PATH` (the tool's primary config file — it silently ignores
-  `/etc/limine-snapper-sync.conf` if this one already exists), instead of
-  leaving that to the tool's own auto-detection.
 
 An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
 is bootstrapped automatically from the AUR itself if not already installed.
