@@ -5,12 +5,10 @@ CONFIG_REPO_URL="${CONFIG_REPO_URL:-https://github.com/socawi-ai/linux-niri}"
 CONFIG_REPO_DIR_WAS_SET=0
 CONFIG_SOURCE_DIR_WAS_SET=0
 USER_BACKUP_ROOT_WAS_SET=0
-MCMOJAVE_CURSORS_DIR_WAS_SET=0
 REFIND_THEME_DIR_WAS_SET=0
 [[ -n "${CONFIG_REPO_DIR+x}" ]] && CONFIG_REPO_DIR_WAS_SET=1
 [[ -n "${CONFIG_SOURCE_DIR+x}" ]] && CONFIG_SOURCE_DIR_WAS_SET=1
 [[ -n "${USER_BACKUP_ROOT+x}" ]] && USER_BACKUP_ROOT_WAS_SET=1
-[[ -n "${MCMOJAVE_CURSORS_DIR+x}" ]] && MCMOJAVE_CURSORS_DIR_WAS_SET=1
 [[ -n "${REFIND_THEME_DIR+x}" ]] && REFIND_THEME_DIR_WAS_SET=1
 CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
 CONFIG_REPO_DIR="${CONFIG_REPO_DIR:-$HOME/.cache/arch-niri-setup/linux-niri}"
@@ -86,9 +84,11 @@ VSCODE_PACKAGE="${VSCODE_PACKAGE:-visual-studio-code-bin}"
 # LACT is in the official Arch repos as of mid-2026 (no COPR/AUR needed,
 # unlike Fedora).
 LACT_PACKAGE="${LACT_PACKAGE:-lact}"
-MCMOJAVE_CURSORS_REPO="${MCMOJAVE_CURSORS_REPO:-https://github.com/vinceliuice/McMojave-cursors}"
-MCMOJAVE_CURSORS_DIR="${MCMOJAVE_CURSORS_DIR:-$HOME/.cache/arch-niri-setup/McMojave-cursors}"
-MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-Mc/Mojave-cursors}"
+# The mcmojave-cursors AUR package installs to /usr/share/icons/mcmojave-cursors
+# (lowercase, matching the pkgname) regardless of TARGET_USER, so no per-user
+# install step or clone directory is needed here.
+MCMOJAVE_CURSORS_PACKAGE="${MCMOJAVE_CURSORS_PACKAGE:-mcmojave-cursors}"
+MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-mcmojave-cursors}"
 POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
 
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
@@ -283,10 +283,6 @@ resolve_target_user() {
 
   if [[ "$CONFIG_SOURCE_DIR_WAS_SET" == "0" ]]; then
     CONFIG_SOURCE_DIR="$CONFIG_REPO_DIR"
-  fi
-
-  if [[ "$MCMOJAVE_CURSORS_DIR_WAS_SET" == "0" ]]; then
-    MCMOJAVE_CURSORS_DIR="$TARGET_HOME/.cache/arch-niri-setup/McMojave-cursors"
   fi
 
   if [[ "$REFIND_THEME_DIR_WAS_SET" == "0" ]]; then
@@ -776,18 +772,10 @@ install_mcmojave_cursors() {
     return 0
   }
 
-  clone_or_update_git_repo "$MCMOJAVE_CURSORS_REPO" "$MCMOJAVE_CURSORS_DIR"
-
-  local theme_dir="$MCMOJAVE_CURSORS_DIR/dist"
-  if [[ ! -d "$theme_dir" || ! -f "$theme_dir/index.theme" ]]; then
-    warn "No installable cursor theme found at $theme_dir; skipping McMojave cursor install."
-    return 0
+  log "Installing McMojave cursors ($MCMOJAVE_CURSORS_PACKAGE) from the AUR."
+  if aur_install_optional "$MCMOJAVE_CURSORS_PACKAGE"; then
+    record_change "Installed McMojave cursor theme ($MCMOJAVE_CURSORS_PACKAGE) from the AUR."
   fi
-
-  run_as_user mkdir -p "$TARGET_HOME/.local/share/icons"
-  replace_user_path_with_dir "$theme_dir" "$TARGET_HOME/.local/share/icons/$MCMOJAVE_CURSOR_THEME"
-
-  record_change "Installed McMojave cursor theme to $TARGET_HOME/.local/share/icons/$MCMOJAVE_CURSOR_THEME."
 }
 
 find_refind_conf() {

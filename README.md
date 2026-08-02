@@ -74,7 +74,7 @@ preconfigured (e.g. via `archinstall`):
 - Noctalia v5 and Noctalia Greeter, from the AUR (`noctalia-git` /
   `noctalia-greeter-git`, the bleeding-edge variants, matching the Fedora
   script's COPR choice)
-- McMojave cursors
+- McMojave cursors, from the AUR (`mcmojave-cursors`)
 - Nautilus Open Any Terminal (AUR), set to Alacritty
 - LACT, with the `lactd` service enabled, for AMD/Nvidia/Intel GPU control
   (official repo — no AUR needed)
