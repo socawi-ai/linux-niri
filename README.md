@@ -80,7 +80,19 @@ preconfigured (e.g. via `archinstall`):
   (official repo — no AUR needed)
 - VS Code (AUR, `visual-studio-code-bin`)
 - Steam, via the `multilib` repo (enabled automatically if needed)
-- Polaris with host setup and user-service autostart
+- Polaris with host setup and user-service autostart. The Arch release
+  package ships with an empty `Icon=` in its `.desktop` file — an upstream
+  bug ([acknowledged in Polaris's own CI
+  config](https://github.com/papi-ux/polaris/blob/master/.github/workflows/opensuse-build.yml)),
+  since the `.desktop` template's `@POLARIS_DESKTOP_ICON@` placeholder is
+  never set by the Arch PKGBUILD — so Polaris shows no icon in the launcher
+  or bar/dock. The script patches `Icon=` back to `polaris` (matching the
+  `polaris.svg` the package does install, under
+  `/usr/share/icons/hicolor/scalable/apps/`) and force-refreshes the hicolor
+  icon cache and desktop database, since pacman's own cache-refresh hook only
+  fires when a whole icon-theme directory appears or disappears, not when a
+  package just adds files to the existing `hicolor` tree. Set
+  `FIX_POLARIS_DESKTOP_ICON=0` to disable it.
 - The [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) visual theme, if
   rEFInd is in use: `refind.conf` is located by searching `/boot`,
   `/boot/efi`, `/efi`, and any mounted vfat filesystem (or `REFIND_CONF_PATH`

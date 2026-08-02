@@ -90,6 +90,16 @@ LACT_PACKAGE="${LACT_PACKAGE:-lact}"
 MCMOJAVE_CURSORS_PACKAGE="${MCMOJAVE_CURSORS_PACKAGE:-mcmojave-cursors}"
 MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-mcmojave-cursors}"
 POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
+# Upstream bug (acknowledged in Polaris's own CI, .github/workflows/opensuse-build.yml):
+# the .desktop template references @POLARIS_DESKTOP_ICON@, but the Arch
+# PKGBUILD's cmake invocation never sets it, so the release package ships
+# Icon= empty and neither the launcher nor bar/dock widgets that read it can
+# resolve an icon. polaris.svg is installed regardless, at
+# /usr/share/icons/hicolor/scalable/apps/polaris.svg, so "polaris" is a
+# correct icon name once Icon= actually points at it.
+FIX_POLARIS_DESKTOP_ICON="${FIX_POLARIS_DESKTOP_ICON:-1}"
+POLARIS_DESKTOP_FILE="${POLARIS_DESKTOP_FILE:-/usr/share/applications/dev.polaris-stream.app.Polaris.desktop}"
+POLARIS_DESKTOP_ICON_NAME="${POLARIS_DESKTOP_ICON_NAME:-polaris}"
 
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
@@ -977,6 +987,49 @@ download_as_user() {
   run_as_user curl -fL "$url" -o "$dest"
 }
 
+fix_polaris_desktop_icon() {
+  [[ "$FIX_POLARIS_DESKTOP_ICON" == "1" ]] || {
+    log "Polaris desktop icon fix is disabled."
+    return 0
+  }
+
+  if ! run_sudo test -f "$POLARIS_DESKTOP_FILE"; then
+    warn "$POLARIS_DESKTOP_FILE not found; cannot fix the Polaris desktop icon."
+    return 0
+  fi
+
+  if run_sudo grep -qE '^Icon=.+$' "$POLARIS_DESKTOP_FILE"; then
+    log "Polaris desktop entry already has an Icon= set; leaving it alone."
+  else
+    backup_system_path "$POLARIS_DESKTOP_FILE"
+    local tmp; tmp="$(mktemp)"
+    run_sudo sed -E "s/^Icon=.*\$/Icon=$POLARIS_DESKTOP_ICON_NAME/" "$POLARIS_DESKTOP_FILE" >"$tmp"
+    if ! grep -qE "^Icon=$POLARIS_DESKTOP_ICON_NAME\$" "$tmp"; then
+      warn "Could not locate an Icon= line in $POLARIS_DESKTOP_FILE to fix."
+      rm -f "$tmp"
+      return 0
+    fi
+    run_sudo install -m 0644 "$tmp" "$POLARIS_DESKTOP_FILE"
+    rm -f "$tmp"
+    log "Set Icon=$POLARIS_DESKTOP_ICON_NAME in $POLARIS_DESKTOP_FILE (upstream ships it empty)."
+    record_change "Fixed the missing icon in Polaris's desktop entry ($POLARIS_DESKTOP_FILE)."
+  fi
+
+  # pacman's gtk-update-icon-cache hook only fires when a whole icon-theme
+  # directory is added or removed (Target = usr/share/icons/*/), not when a
+  # package merely drops new files into the already-existing hicolor tree —
+  # so polaris.svg can sit there unindexed, showing as a broken icon in
+  # launchers/bars until the cache is rebuilt by hand.
+  if have_command gtk-update-icon-cache; then
+    run_sudo gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || \
+      warn "Could not refresh the hicolor icon cache."
+  fi
+  if have_command update-desktop-database; then
+    run_sudo update-desktop-database -q /usr/share/applications || \
+      warn "Could not refresh the desktop file database."
+  fi
+}
+
 install_polaris() {
   [[ "$INSTALL_POLARIS" == "1" ]] || {
     log "Polaris installation is disabled."
@@ -996,6 +1049,8 @@ install_polaris() {
     warn "Could not install Polaris package."
     return 0
   fi
+
+  fix_polaris_desktop_icon
 
   if [[ "$SETUP_POLARIS_HOST" == "1" ]]; then
     if have_command polaris; then
