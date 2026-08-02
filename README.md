@@ -64,10 +64,10 @@ env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
 ## Arch Linux
 
 `arch-niri-setup.sh` installs the same desktop as the Fedora script, adapted
-to pacman/AUR. It never touches the bootloader (whatever it is — Limine,
-rEFInd, GRUB, etc.), Plymouth, `mkinitcpio` HOOKS, or kernel-cmdline
-settings; all of that is assumed already installed and preconfigured (e.g.
-via `archinstall`):
+to pacman/AUR. It never installs or configures the bootloader itself
+(whatever it is — Limine, rEFInd, GRUB, etc.), Plymouth, `mkinitcpio` HOOKS,
+or kernel-cmdline settings; all of that is assumed already installed and
+preconfigured (e.g. via `archinstall`):
 
 - Niri, greetd, Alacritty, Nautilus, Fish, Firefox, PipeWire, pavucontrol,
   desktop portals, GTK/Qt Wayland support — all from the official repos
@@ -81,6 +81,14 @@ via `archinstall`):
 - VS Code (AUR, `visual-studio-code-bin`)
 - Steam, via the `multilib` repo (enabled automatically if needed)
 - Polaris with host setup and user-service autostart
+- The [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) visual theme, if
+  rEFInd is in use: `refind.conf` is located by searching `/boot`,
+  `/boot/efi`, `/efi`, and any mounted vfat filesystem (or `REFIND_CONF_PATH`
+  if set explicitly), the theme is cloned into `themes/rEFInd-nils` next to
+  it, and a matching `include` line is appended to `refind.conf` if not
+  already present. Skipped gracefully if `refind.conf` can't be found (e.g.
+  a different bootloader is in use) — set `INSTALL_REFIND_THEME=0` to
+  disable it outright.
 
 An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
 is bootstrapped automatically from the AUR itself if not already installed.

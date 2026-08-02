@@ -6,10 +6,12 @@ CONFIG_REPO_DIR_WAS_SET=0
 CONFIG_SOURCE_DIR_WAS_SET=0
 USER_BACKUP_ROOT_WAS_SET=0
 MCMOJAVE_CURSORS_DIR_WAS_SET=0
+REFIND_THEME_DIR_WAS_SET=0
 [[ -n "${CONFIG_REPO_DIR+x}" ]] && CONFIG_REPO_DIR_WAS_SET=1
 [[ -n "${CONFIG_SOURCE_DIR+x}" ]] && CONFIG_SOURCE_DIR_WAS_SET=1
 [[ -n "${USER_BACKUP_ROOT+x}" ]] && USER_BACKUP_ROOT_WAS_SET=1
 [[ -n "${MCMOJAVE_CURSORS_DIR+x}" ]] && MCMOJAVE_CURSORS_DIR_WAS_SET=1
+[[ -n "${REFIND_THEME_DIR+x}" ]] && REFIND_THEME_DIR_WAS_SET=1
 CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
 CONFIG_REPO_DIR="${CONFIG_REPO_DIR:-$HOME/.cache/arch-niri-setup/linux-niri}"
 CONFIG_SOURCE_DIR="${CONFIG_SOURCE_DIR:-}"
@@ -35,6 +37,18 @@ SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
 ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
 ENABLE_POLARIS_LINGER="${ENABLE_POLARIS_LINGER:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
+
+# rEFInd theme — this script never installs or configures rEFInd itself
+# (it's assumed already set up, e.g. via archinstall), only applies a visual
+# theme on top of an existing installation. Skipped gracefully if refind.conf
+# can't be found.
+INSTALL_REFIND_THEME="${INSTALL_REFIND_THEME:-1}"
+REFIND_THEME_REPO="${REFIND_THEME_REPO:-https://github.com/NilsPvR/rEFInd-nils}"
+REFIND_THEME_NAME="${REFIND_THEME_NAME:-rEFInd-nils}"
+REFIND_THEME_DIR="${REFIND_THEME_DIR:-$HOME/.cache/arch-niri-setup/refind-theme}"
+# Explicit override if find_refind_conf() can't locate refind.conf on its own
+# (unusual ESP mount point or layout).
+REFIND_CONF_PATH="${REFIND_CONF_PATH:-}"
 
 # Noctalia is installed from the AUR (there is no COPR equivalent). This
 # mirrors the Fedora script's choice of the bleeding-edge "-git" build over
@@ -97,7 +111,7 @@ else
   COLOR_DIM=""
 fi
 
-TOTAL_SECTIONS=8
+TOTAL_SECTIONS=9
 
 declare -a CHANGES=()
 declare -a WARNINGS=()
@@ -248,6 +262,10 @@ resolve_target_user() {
 
   if [[ "$MCMOJAVE_CURSORS_DIR_WAS_SET" == "0" ]]; then
     MCMOJAVE_CURSORS_DIR="$TARGET_HOME/.cache/arch-niri-setup/McMojave-cursors"
+  fi
+
+  if [[ "$REFIND_THEME_DIR_WAS_SET" == "0" ]]; then
+    REFIND_THEME_DIR="$TARGET_HOME/.cache/arch-niri-setup/refind-theme"
   fi
 
   log "Target user: $TARGET_USER"
@@ -745,6 +763,95 @@ install_mcmojave_cursors() {
   replace_user_path_with_dir "$theme_dir" "$TARGET_HOME/.local/share/icons/$MCMOJAVE_CURSOR_THEME"
 
   record_change "Installed McMojave cursor theme to $TARGET_HOME/.local/share/icons/$MCMOJAVE_CURSOR_THEME."
+}
+
+find_refind_conf() {
+  if [[ -n "$REFIND_CONF_PATH" ]]; then
+    if run_sudo test -f "$REFIND_CONF_PATH"; then
+      printf '%s\n' "$REFIND_CONF_PATH"
+      return 0
+    fi
+    warn "REFIND_CONF_PATH=$REFIND_CONF_PATH does not exist; falling back to searching for it."
+  fi
+
+  # Search actual mount points rather than guessing a fixed path — ESP
+  # layout varies (mounted at /boot, /boot/efi, /efi, or elsewhere; rEFInd
+  # itself may live under EFI/refind/, EFI/BOOT/, or elsewhere on the ESP).
+  local roots=(/boot /boot/efi /efi)
+  local vfat_target
+  while IFS= read -r vfat_target; do
+    [[ -n "$vfat_target" ]] || continue
+    roots+=("$vfat_target")
+  done < <(findmnt -rn -o TARGET --types vfat 2>/dev/null || true)
+
+  local root hit
+  for root in "${roots[@]}"; do
+    [[ -d "$root" ]] || continue
+    hit="$(run_sudo find "$root" -maxdepth 4 -iname 'refind.conf' 2>/dev/null | head -1)"
+    [[ -n "$hit" ]] && { printf '%s\n' "$hit"; return 0; }
+  done
+
+  return 1
+}
+
+install_refind_theme() {
+  [[ "$INSTALL_REFIND_THEME" == "1" ]] || {
+    log "rEFInd theme installation is disabled."
+    return 0
+  }
+
+  local refind_conf
+  refind_conf="$(find_refind_conf || true)"
+  if [[ -z "$refind_conf" ]]; then
+    warn "Could not locate refind.conf (searched /boot, /boot/efi, /efi, and any mounted vfat filesystem). Set REFIND_CONF_PATH to its exact location if it's somewhere unusual, or set INSTALL_REFIND_THEME=0 if rEFInd isn't actually installed."
+    return 0
+  fi
+
+  log "Fetching rEFInd theme from $REFIND_THEME_REPO."
+  clone_or_update_git_repo "$REFIND_THEME_REPO" "$REFIND_THEME_DIR"
+
+  [[ -f "$REFIND_THEME_DIR/theme.conf" ]] || {
+    warn "$REFIND_THEME_DIR has no theme.conf; not a valid rEFInd theme, skipping."
+    return 0
+  }
+
+  local refind_dir theme_dest
+  refind_dir="$(dirname "$refind_conf")"
+  theme_dest="$refind_dir/themes/$REFIND_THEME_NAME"
+
+  backup_system_path "$theme_dest"
+  run_sudo rm -rf "$theme_dest"
+  run_sudo install -d -m 0755 "$(dirname "$theme_dest")"
+
+  local tmp_theme; tmp_theme="$(mktemp -d)"
+  cp -r "$REFIND_THEME_DIR/." "$tmp_theme/"
+  rm -rf "$tmp_theme/.git"
+  # -r, not -a: the ESP is vfat, which has no concept of Unix ownership —
+  # cp -a always fails trying to chown there, even as root.
+  run_sudo mkdir -p "$theme_dest"
+  run_sudo cp -r "$tmp_theme/." "$theme_dest/"
+  rm -rf "$tmp_theme"
+
+  run_sudo test -f "$theme_dest/theme.conf" || \
+    die "Theme copy to $theme_dest failed — theme.conf missing after copy."
+
+  log "Installed rEFInd theme '$REFIND_THEME_NAME' to $theme_dest."
+  record_change "Installed rEFInd theme '$REFIND_THEME_NAME' from $REFIND_THEME_REPO."
+
+  if run_sudo grep -qE "^include[[:space:]]+themes/${REFIND_THEME_NAME}/theme\.conf[[:space:]]*\$" "$refind_conf"; then
+    log "Theme already included in $refind_conf."
+    return 0
+  fi
+
+  backup_system_path "$refind_conf"
+  local tmp; tmp="$(mktemp)"
+  run_sudo cat "$refind_conf" >"$tmp"
+  printf '\ninclude themes/%s/theme.conf\n' "$REFIND_THEME_NAME" >>"$tmp"
+  run_sudo install -m 0644 "$tmp" "$refind_conf"
+  rm -f "$tmp"
+
+  log "Added theme include to $refind_conf."
+  record_change "Enabled rEFInd theme '$REFIND_THEME_NAME' in $refind_conf."
 }
 
 install_nautilus_open_any_terminal() {
@@ -1288,6 +1395,9 @@ main() {
 
   section "Default apps"
   install_default_apps
+
+  section "rEFInd theme"
+  install_refind_theme
 
   section "Noctalia"
   install_noctalia_packages
