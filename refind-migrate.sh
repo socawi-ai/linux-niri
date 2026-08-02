@@ -5,13 +5,31 @@ set -Eeuo pipefail
 # rEFInd UEFI boot manager — standalone script
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# Installs rEFInd as the primary UEFI boot manager. This does NOT replace
-# GRUB or boot Linux kernels directly: GRUB stays installed exactly as it
-# is, and rEFInd simply chainloads into it — its normal boot-loader auto-scan
-# finds the existing EFI/fedora/grubx64.efi and offers it as a menu entry.
-# GRUB itself is configured for an instant, silent boot (GRUB_TIMEOUT=0,
-# hidden menu), so in practice: firmware -> rEFInd -> GRUB -> Linux, with no
-# visible menus unless you interact with rEFInd's own timeout.
+# Installs rEFInd as the primary UEFI boot manager, then offers two further,
+# separately-gated stages so a full migration away from GRUB can be tested
+# before it's made irreversible:
+#
+#   1. Chainload (always runs): GRUB stays installed exactly as it is, and
+#      rEFInd simply chainloads into it — its normal boot-loader auto-scan
+#      finds the existing EFI/fedora/grubx64.efi and offers it as a menu
+#      entry. GRUB itself is configured for an instant, silent boot
+#      (GRUB_TIMEOUT=0, hidden menu). firmware -> rEFInd -> GRUB -> Linux.
+#
+#   2. Direct boot (offered once stage 1 succeeds): configures rEFInd to
+#      ALSO boot the Linux kernel directly out of /boot, as a second menu
+#      entry alongside the still-present GRUB chainload entry. Nothing is
+#      removed — reboot and pick the new entry to test it; if it doesn't
+#      work, the GRUB entry is still right there. Gated by ENABLE_DIRECT_BOOT
+#      (unset = ask interactively; 1/0 = force yes/no non-interactively).
+#
+#   3. GRUB removal (offered on a later run, once stage 2 is detected as
+#      already configured): completely removes GRUB, grubby, and shim from
+#      the system — package removal, NVRAM entry, and ESP/`/boot` files.
+#      This is irreversible without rescue media. Only offered after you've
+#      confirmed (by rebooting) that direct boot actually works. Gated by
+#      REMOVE_GRUB (unset = ask interactively; 1/0 = force yes/no). Neither
+#      this stage nor stage 2 is ever triggered by ASSUME_YES alone — they
+#      require their own explicit answer, interactively or via env var.
 #
 # Split out of fedora-niri-setup.sh so bootloader changes can be run, tested,
 # and re-run independently of the desktop setup.
@@ -26,14 +44,26 @@ set -Eeuo pipefail
 # script runs non-interactively, you must manually enroll that key as a MOK
 # afterwards (exact command is printed in the summary).
 #
+# Secure Boot + GRUB removal: Fedora's shipped kernels are trusted via
+# shim's own embedded cert, not the raw firmware db. Removing shim (part of
+# stage 3) while Secure Boot is enabled means the kernel is no longer
+# trusted unless you re-sign it yourself with rEFInd's local key on every
+# update. Stage 3 warns heavily about this and requires a second, separate
+# confirmation (or ALLOW_GRUB_REMOVAL_WITH_SECURE_BOOT=1) before proceeding.
+#
 # Theme: installs a visual theme from a git repo following the standard
 # rEFInd theme layout (banner/, icons/, selection/, theme.conf). Defaults to
 # https://github.com/NilsPvR/rEFInd-nils. Set INSTALL_REFIND_THEME=0 to skip.
 #
 # Usage:
 #   ./refind-migrate.sh                       # interactive
-#   ASSUME_YES=1 ./refind-migrate.sh           # non-interactive
+#   ASSUME_YES=1 ./refind-migrate.sh           # non-interactive (stage 1 only;
+#                                              # stages 2/3 still ask unless
+#                                              # ENABLE_DIRECT_BOOT/REMOVE_GRUB set)
 #   INSTALL_REFIND_THEME=0 ./refind-migrate.sh # skip the visual theme
+#   ENABLE_DIRECT_BOOT=1 ./refind-migrate.sh   # non-interactively enable stage 2
+#   REMOVE_GRUB=1 ./refind-migrate.sh          # non-interactively run stage 3
+#                                              # (only once stage 2 is configured)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ASSUME_YES="${ASSUME_YES:-0}"
@@ -51,6 +81,17 @@ REFIND_THEME_REPO="${REFIND_THEME_REPO:-https://github.com/NilsPvR/rEFInd-nils}"
 REFIND_THEME_NAME="${REFIND_THEME_NAME:-rEFInd-nils}"
 REFIND_THEME_DIR="${REFIND_THEME_DIR:-$HOME/.cache/fedora-niri-setup/refind-theme}"
 
+# Stage 2/3 gates. Unset ("") means "ask interactively"; "1"/"0" force
+# yes/no non-interactively. Deliberately independent of ASSUME_YES — see
+# confirm_dangerous().
+ENABLE_DIRECT_BOOT="${ENABLE_DIRECT_BOOT:-}"
+REMOVE_GRUB="${REMOVE_GRUB:-}"
+ALLOW_GRUB_REMOVAL_WITH_SECURE_BOOT="${ALLOW_GRUB_REMOVAL_WITH_SECURE_BOOT:-}"
+
+# Marker file (on the ESP, alongside refind's own files) recording that
+# stage 2 (direct boot) has been configured and validated by this script.
+REFIND_DIRECT_BOOT_MARKER_NAME="${REFIND_DIRECT_BOOT_MARKER_NAME:-.fedora-niri-setup-direct-boot}"
+
 # Runtime state — populated by preflight functions; not user-configurable.
 _REFIND_ESP=""
 _REFIND_ESP_DISK=""
@@ -61,6 +102,10 @@ _REFIND_SECURE_BOOT=""
 _REFIND_BOOT_NUM=""
 _GRUB_BOOT_NUM=""
 _REFIND_THEME_INSTALLED=""
+_REFIND_DIRECT_BOOT_CONFIGURED=""
+_REFIND_BOOT_DRIVER_FILE=""
+_REFIND_BOOT_DRIVER_SRC=""
+_GRUB_REMOVED=""
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_FILE:-$HOME/refind-migrate-$TIMESTAMP.log}"
@@ -147,6 +192,32 @@ ask_yes_no() {
     printf '%s %s ' "$prompt" "$suffix" >/dev/tty
     IFS= read -r answer </dev/tty
     answer="${answer:-$default}"
+    case "$answer" in
+      y|Y|yes|YES) return 0 ;;
+      n|N|no|NO) return 1 ;;
+      *) printf 'Please answer yes or no.\n' >/dev/tty ;;
+    esac
+  done
+}
+
+confirm_dangerous() {
+  local prompt="$1"
+  local override_var="$2"
+  local override_val="${!override_var:-}"
+  local answer
+
+  case "$override_val" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+
+  [[ -r /dev/tty && -w /dev/tty ]] || \
+    die "A decision is required for a destructive step, but no interactive terminal is available. Re-run from a terminal, or set $override_var=1 (proceed) or $override_var=0 (skip) explicitly."
+
+  while true; do
+    printf '%s [y/N] ' "$prompt" >/dev/tty
+    IFS= read -r answer </dev/tty
+    answer="${answer:-n}"
     case "$answer" in
       y|Y|yes|YES) return 0 ;;
       n|N|no|NO) return 1 ;;
@@ -490,6 +561,7 @@ refind_install_theme() {
 }
 
 refind_write_conf() {
+  local boot_mode="${1:-chainload}"
   local esp_dir="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}"
   local conf_dest="${esp_dir}/refind.conf"
 
@@ -502,10 +574,26 @@ refind_write_conf() {
 
 timeout ${REFIND_TIMEOUT}
 
+EOF
+
+  if [[ "$boot_mode" == "direct" ]]; then
+    cat >>"$tmp" <<EOF
+# Direct-boot mode: rEFInd scans /boot for Linux kernels and boots them
+# directly (using /boot/refind_linux.conf for kernel options), in addition
+# to its normal boot-loader auto-scan, which still finds and offers the
+# existing GRUB EFI binary in EFI/fedora/ as a separate menu entry — GRUB
+# is kept until it's explicitly removed (see refind-migrate.sh stage 3).
+EOF
+  else
+    cat >>"$tmp" <<EOF
 # Don't scan for or directly boot Linux kernels — GRUB (kept, chainloaded)
 # owns that job. rEFInd's normal boot-loader auto-scan still finds and
 # offers the existing GRUB EFI binary in EFI/fedora/ as a menu entry.
 scan_all_linux_kernels false
+EOF
+  fi
+
+  cat >>"$tmp" <<EOF
 
 # NVRAM is managed externally via efibootmgr, not by rEFInd itself.
 use_nvram false
@@ -595,8 +683,9 @@ refind_locate_grub_entry() {
 }
 
 refind_validate() {
+  local boot_mode="${1:-chainload}"
   local errors=0
-  log "Validating rEFInd installation…"
+  log "Validating rEFInd installation… (mode: $boot_mode)"
 
   local efi_bin="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}/${_REFIND_EFI_NAME}"
   if run_sudo test -s "$efi_bin"; then
@@ -631,6 +720,22 @@ refind_validate() {
     errors=$(( errors + 1 ))
   fi
 
+  if [[ "$boot_mode" == "direct" || "$boot_mode" == "removed" ]]; then
+    if [[ -n "$_REFIND_BOOT_DRIVER_FILE" ]] && run_sudo test -s "$_REFIND_BOOT_DRIVER_FILE"; then
+      log "  [✓] /boot filesystem driver present: $_REFIND_BOOT_DRIVER_FILE"
+    else
+      warn "  [✗] /boot filesystem driver missing: ${_REFIND_BOOT_DRIVER_FILE:-???}"
+      errors=$(( errors + 1 ))
+    fi
+
+    if run_sudo test -s /boot/refind_linux.conf; then
+      log "  [✓] /boot/refind_linux.conf present"
+    else
+      warn "  [✗] /boot/refind_linux.conf missing or empty — rEFInd has no kernel options to boot with."
+      errors=$(( errors + 1 ))
+    fi
+  fi
+
   local grub_efi_name
   case "$_REFIND_ARCH" in
     x64)  grub_efi_name="grubx64.efi"  ;;
@@ -638,15 +743,124 @@ refind_validate() {
     ia32) grub_efi_name="grubia32.efi" ;;
   esac
   local grub_efi="${_REFIND_ESP}/EFI/fedora/${grub_efi_name}"
-  if run_sudo test -s "$grub_efi"; then
-    log "  [✓] GRUB EFI binary present for chainloading: $grub_efi"
+  if [[ "$boot_mode" == "removed" ]]; then
+    if run_sudo test -s "$grub_efi"; then
+      warn "  [✗] GRUB EFI binary still present after removal: $grub_efi"
+      errors=$(( errors + 1 ))
+    else
+      log "  [✓] GRUB EFI binary absent, as expected after removal."
+    fi
   else
-    warn "  [✗] GRUB EFI binary not found: $grub_efi — rEFInd will have nothing to chainload."
-    errors=$(( errors + 1 ))
+    if run_sudo test -s "$grub_efi"; then
+      log "  [✓] GRUB EFI binary present for chainloading: $grub_efi"
+    else
+      warn "  [✗] GRUB EFI binary not found: $grub_efi — rEFInd will have nothing to chainload."
+      errors=$(( errors + 1 ))
+    fi
   fi
 
   (( errors == 0 )) || die "rEFInd validation failed ($errors error(s)). Fix the warnings above and re-run."
   log "rEFInd validation passed."
+}
+
+refind_direct_boot_configured() {
+  run_sudo test -f "${_REFIND_ESP}/${REFIND_ESP_SUBDIR}/${REFIND_DIRECT_BOOT_MARKER_NAME}"
+}
+
+refind_detect_boot_driver() {
+  local boot_fstype driver_name
+
+  boot_fstype="$(findmnt -n -o FSTYPE /boot 2>/dev/null || true)"
+  if [[ -z "$boot_fstype" ]]; then
+    boot_fstype="$(findmnt -n -o FSTYPE / 2>/dev/null || true)"
+  fi
+  [[ -n "$boot_fstype" ]] || die "Could not determine the filesystem type backing /boot; cannot select a rEFInd driver for direct boot."
+
+  _REFIND_BOOT_DRIVER_FILE=""
+  _REFIND_BOOT_DRIVER_SRC=""
+
+  case "$boot_fstype" in
+    vfat|fat|fat32)
+      # ESP itself is vfat and rEFInd reads it natively — no driver needed.
+      log "/boot is vfat; no rEFInd filesystem driver is required."
+      return 0
+      ;;
+    ext2) driver_name="ext2_x64.efi" ;;
+    ext3|ext4) driver_name="ext4_x64.efi" ;;
+    btrfs) driver_name="btrfs_x64.efi" ;;
+    hfsplus|hfs) driver_name="hfs_x64.efi" ;;
+    iso9660) driver_name="iso9660_x64.efi" ;;
+    reiserfs) driver_name="reiserfs_x64.efi" ;;
+    *)
+      die "/boot uses filesystem '$boot_fstype', which has no bundled rEFInd driver (available: ext2, ext4, btrfs, hfs+, iso9660, reiserfs). Direct boot cannot be configured safely; keep using chainload mode."
+      ;;
+  esac
+
+  _REFIND_BOOT_DRIVER_SRC="/usr/share/rEFInd/refind/drivers_${_REFIND_ARCH}/${driver_name}"
+  run_sudo test -s "$_REFIND_BOOT_DRIVER_SRC" || \
+    die "Expected rEFInd driver not found: $_REFIND_BOOT_DRIVER_SRC (rEFInd package layout may have changed)."
+
+  _REFIND_BOOT_DRIVER_FILE="${_REFIND_ESP}/${REFIND_ESP_SUBDIR}/drivers_${_REFIND_ARCH}/${driver_name}"
+  log "Detected /boot filesystem: $boot_fstype → driver $driver_name."
+}
+
+refind_install_boot_driver() {
+  refind_detect_boot_driver
+
+  [[ -n "$_REFIND_BOOT_DRIVER_FILE" ]] || return 0
+
+  run_sudo install -d -m 0755 "$(dirname "$_REFIND_BOOT_DRIVER_FILE")"
+  run_sudo install -m 0644 "$_REFIND_BOOT_DRIVER_SRC" "$_REFIND_BOOT_DRIVER_FILE"
+  log "Installed rEFInd /boot filesystem driver: $_REFIND_BOOT_DRIVER_FILE."
+}
+
+refind_write_linux_conf() {
+  backup_system_path /boot/refind_linux.conf
+
+  if have_command mkrlconf; then
+    log "Regenerating /boot/refind_linux.conf with mkrlconf."
+    run_sudo mkrlconf --force || \
+      die "mkrlconf failed to generate /boot/refind_linux.conf."
+  else
+    warn "mkrlconf not found (expected from rEFInd-tools); writing a minimal /boot/refind_linux.conf by hand."
+    local cmdline root_opts
+    if [[ -r /etc/kernel/cmdline ]]; then
+      cmdline="$(cat /etc/kernel/cmdline)"
+    else
+      cmdline="$(sed -E 's/BOOT_IMAGE=\S+//; s/initrd=\S+//' /proc/cmdline)"
+    fi
+    root_opts="$(printf '%s' "$cmdline" | xargs)"
+    [[ -n "$root_opts" ]] || die "Could not determine kernel boot options for refind_linux.conf (checked /etc/kernel/cmdline and /proc/cmdline)."
+
+    local tmp; tmp="$(mktemp)"
+    cat >"$tmp" <<EOF
+"Boot with standard options"  "${root_opts}"
+"Boot to single-user mode"    "${root_opts} single"
+EOF
+    run_sudo install -m 0644 "$tmp" /boot/refind_linux.conf
+    rm -f "$tmp"
+  fi
+
+  run_sudo test -s /boot/refind_linux.conf || \
+    die "/boot/refind_linux.conf is missing or empty after generation."
+}
+
+refind_configure_direct_boot() {
+  log "Configuring rEFInd to boot Linux directly, alongside the existing GRUB chainload entry."
+
+  refind_install_boot_driver
+  refind_write_linux_conf
+  refind_write_conf direct
+  refind_validate direct
+
+  run_sudo touch "${_REFIND_ESP}/${REFIND_ESP_SUBDIR}/${REFIND_DIRECT_BOOT_MARKER_NAME}"
+  _REFIND_DIRECT_BOOT_CONFIGURED=1
+  record_change "Configured rEFInd to boot Linux directly from /boot, alongside the existing GRUB chainload entry."
+
+  printf '\n  %sDirect boot configured — GRUB has NOT been touched.%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
+  printf '  Reboot and pick the new direct-boot entry in the rEFInd menu to test it.\n'
+  printf '  If it works, re-run this script to be offered the option to remove GRUB.\n'
+  printf '  If it does not work, the GRUB chainload entry is still there as before.\n\n'
 }
 
 grub_upsert_default() {
@@ -694,6 +908,80 @@ refind_configure_grub_boot() {
   fi
 }
 
+refind_remove_grub() {
+  if ! package_installed grub2-common; then
+    log "GRUB is already fully removed."
+    _GRUB_REMOVED=1
+    return 0
+  fi
+
+  refind_direct_boot_configured || \
+    die "Direct boot has not been configured and validated yet. Re-run this script and accept the direct-boot prompt first, then reboot and test it before removing GRUB."
+
+  # Re-detect rather than trust in-process state: this stage commonly runs
+  # in a later invocation than the one that configured direct boot.
+  refind_detect_boot_driver
+
+  refind_locate_nvram_entry
+  local first
+  first="$(run_sudo efibootmgr 2>/dev/null | awk '/^BootOrder:/{split($2,a,","); print a[1]}' || true)"
+  [[ "${first^^}" == "${_REFIND_BOOT_NUM^^}" ]] || \
+    die "rEFInd (Boot${_REFIND_BOOT_NUM}) is not first in BootOrder (first: Boot${first}). Refusing to remove GRUB until rEFInd is confirmed as the active boot target."
+
+  local pkgs=()
+  mapfile -t pkgs < <(rpm -qa --qf '%{NAME}\n' 'grub2-*' 'shim-*' grubby 2>/dev/null | sort -u)
+  (( ${#pkgs[@]} > 0 )) || { log "No GRUB/shim/grubby packages found to remove."; _GRUB_REMOVED=1; return 0; }
+
+  refind_locate_grub_entry
+
+  warn "This will PERMANENTLY remove GRUB from this system:"
+  warn "  Packages to remove : ${pkgs[*]}"
+  warn "  NVRAM entry removed: Boot${_GRUB_BOOT_NUM:-<none found>}"
+  warn "  Files removed      : /boot/grub2, ${_REFIND_ESP}/EFI/fedora"
+  warn "There is no firmware-level fallback to GRUB after this. Recovery requires"
+  warn "Fedora rescue/live media."
+  confirm_dangerous "Have you already rebooted and confirmed rEFInd's direct-boot entry works, and want to remove GRUB completely now?" REMOVE_GRUB || {
+    log "GRUB removal skipped."
+    return 0
+  }
+
+  if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
+    warn "Secure Boot is ENABLED. Removing shim also removes the trust chain Fedora's"
+    warn "signed kernels rely on (shim embeds Fedora's cert; the raw firmware db"
+    warn "typically does not). After this, Secure Boot will likely refuse to boot"
+    warn "your kernel at all unless you re-sign every kernel yourself with rEFInd's"
+    warn "local key (sudo sbsign --key ... --cert ... --output vmlinuz vmlinuz) on"
+    warn "every kernel update. Disabling Secure Boot in firmware is the supported path."
+    confirm_dangerous "Proceed with GRUB removal anyway, with Secure Boot enabled?" ALLOW_GRUB_REMOVAL_WITH_SECURE_BOOT || {
+      log "GRUB removal skipped because Secure Boot is enabled."
+      return 0
+    }
+  fi
+
+  backup_system_path /boot/grub2
+  backup_system_path "${_REFIND_ESP}/EFI/fedora"
+  backup_system_path /etc/default/grub
+
+  log "Removing packages: ${pkgs[*]}"
+  run_sudo "$DNF_BIN" remove -y "${pkgs[@]}" || \
+    die "Failed to remove GRUB/shim/grubby packages. Review the output above."
+
+  if [[ -n "$_GRUB_BOOT_NUM" ]]; then
+    run_sudo efibootmgr --bootnum "$_GRUB_BOOT_NUM" --delete-bootnum || \
+      warn "Could not delete GRUB's NVRAM entry Boot${_GRUB_BOOT_NUM}. Remove it manually: sudo efibootmgr --bootnum ${_GRUB_BOOT_NUM} --delete-bootnum"
+  else
+    warn "No separate GRUB NVRAM entry was found earlier; nothing to delete from NVRAM."
+  fi
+
+  run_sudo rm -rf /boot/grub2
+  run_sudo rm -rf "${_REFIND_ESP}/EFI/fedora"
+
+  refind_validate removed
+
+  _GRUB_REMOVED=1
+  record_change "Completely removed GRUB, grubby, and shim from the system. rEFInd now boots Linux directly."
+}
+
 refind_print_summary() {
   printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_CYAN" "$COLOR_RESET"
   printf '%s  rEFInd Boot Manager Summary%s\n' "$COLOR_CYAN" "$COLOR_RESET"
@@ -708,30 +996,48 @@ refind_print_summary() {
   else
     printf '  rEFInd theme         : none (default look)\n'
   fi
-  printf '  Boots into           : existing GRUB installation (chainloaded, unchanged)\n'
+  if [[ "$_GRUB_REMOVED" == "1" ]]; then
+    printf '  Boot mode            : direct boot — GRUB has been completely removed\n'
+  elif [[ "$_REFIND_DIRECT_BOOT_CONFIGURED" == "1" ]]; then
+    printf '  Boot mode            : direct boot configured, GRUB kept alongside for testing\n'
+  else
+    printf '  Boot mode            : chainload (GRUB unchanged)\n'
+  fi
   printf '  GRUB menu            : hidden, 0s timeout (instant boot)\n'
   printf '  Secure Boot state    : %s\n'                 "$_REFIND_SECURE_BOOT"
   printf '  NVRAM entry          : Boot%s  (%s)\n'        "${_REFIND_BOOT_NUM:-???}" "$REFIND_ENTRY_LABEL"
-  if [[ -n "$_GRUB_BOOT_NUM" ]]; then
+  if [[ -n "$_GRUB_BOOT_NUM" && "$_GRUB_REMOVED" != "1" ]]; then
     printf '  GRUB NVRAM entry     : Boot%s  (kept as-is, untouched fallback)\n' "$_GRUB_BOOT_NUM"
   fi
   printf '\n'
   printf '  %sCurrent UEFI boot order:%s\n' "$COLOR_BOLD" "$COLOR_RESET"
   run_sudo efibootmgr 2>/dev/null | grep -E '^Boot[0-9A-Fa-f]{4}' | sed 's/^/    /' || true
   printf '\n'
-  printf '  %sRecovery (if rEFInd does not boot):%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
-  printf '  GRUB was NOT modified or removed — only rEFInd'"'"'s own NVRAM entry was\n'
-  printf '  added/reordered.\n'
-  if [[ -n "$_GRUB_BOOT_NUM" ]]; then
-    printf '  1. At the firmware boot menu (usually F12, F11, Esc, or Del at power-on),\n'
-    printf '     select Boot%s directly — this bypasses rEFInd entirely and boots\n' "$_GRUB_BOOT_NUM"
-    printf '     straight into GRUB.\n'
-    printf '  2. To make that permanent:\n'
-    printf '       sudo efibootmgr --bootorder %s\n' "$_GRUB_BOOT_NUM"
+  if [[ "$_GRUB_REMOVED" == "1" ]]; then
+    printf '  %sRecovery (if rEFInd does not boot):%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
+    printf '  GRUB has been completely removed — there is no firmware-level fallback to\n'
+    printf '  it anymore. If rEFInd fails to boot:\n'
+    printf '  1. Boot Fedora rescue/live media and chroot into this installation.\n'
+    printf '  2. Reinstall the bootloader stack: sudo dnf install grub2-efi-x64 shim-x64 grubby\n'
+    printf '  3. Regenerate its config: sudo grub2-mkconfig -o /boot/efi/EFI/fedora/grub.cfg\n'
+    printf '  4. Re-register it in NVRAM: sudo efibootmgr --create --disk <disk> --part <N> \\\n'
+    printf '       --label "Fedora Linux" --loader "\\\\EFI\\\\fedora\\\\shimx64.efi"\n'
+    printf '  Backups of the removed GRUB files are in %s.\n' "$SYSTEM_BACKUP_ROOT"
   else
-    printf '  1. At the firmware boot menu (usually F12, F11, Esc, or Del at power-on),\n'
-    printf '     look for a "Fedora" or similar entry and select it directly to bypass\n'
-    printf '     rEFInd and boot straight into GRUB.\n'
+    printf '  %sRecovery (if rEFInd does not boot):%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
+    printf '  GRUB was NOT modified or removed — only rEFInd'"'"'s own NVRAM entry was\n'
+    printf '  added/reordered.\n'
+    if [[ -n "$_GRUB_BOOT_NUM" ]]; then
+      printf '  1. At the firmware boot menu (usually F12, F11, Esc, or Del at power-on),\n'
+      printf '     select Boot%s directly — this bypasses rEFInd entirely and boots\n' "$_GRUB_BOOT_NUM"
+      printf '     straight into GRUB.\n'
+      printf '  2. To make that permanent:\n'
+      printf '       sudo efibootmgr --bootorder %s\n' "$_GRUB_BOOT_NUM"
+    else
+      printf '  1. At the firmware boot menu (usually F12, F11, Esc, or Del at power-on),\n'
+      printf '     look for a "Fedora" or similar entry and select it directly to bypass\n'
+      printf '     rEFInd and boot straight into GRUB.\n'
+    fi
   fi
   if [[ "$_REFIND_SECURE_BOOT" == "enabled" ]]; then
     printf '\n  %sSecure Boot — action required before rEFInd will start:%s\n' "$COLOR_YELLOW" "$COLOR_RESET"
@@ -750,6 +1056,8 @@ install_refind() {
   warn "rEFInd will be installed as the primary UEFI boot manager."
   warn "It chainloads your existing GRUB installation — GRUB itself is not removed"
   warn "or modified beyond setting its timeout to 0 for an instant, silent boot."
+  warn "(Direct-boot and full GRUB-removal stages, if you opt into them below or on"
+  warn "a later run, are separately confirmed and clearly labeled as such.)"
   if [[ "$ASSUME_YES" != "1" ]]; then
     ask_yes_no "Continue with rEFInd installation?" y || {
       log "rEFInd installation cancelled by user."
@@ -771,8 +1079,25 @@ install_refind() {
   refind_validate
   refind_configure_grub_boot
 
-  refind_print_summary
   record_change "Installed rEFInd as the primary UEFI boot manager, chainloading GRUB."
+
+  if refind_direct_boot_configured; then
+    _REFIND_DIRECT_BOOT_CONFIGURED=1
+    if package_installed grub2-common; then
+      log "Direct boot is already configured from a previous run."
+      # refind_remove_grub asks its own confirmation, right alongside the
+      # detailed list of what it's about to remove.
+      refind_remove_grub
+    else
+      log "GRUB has already been fully removed."
+      _GRUB_REMOVED=1
+    fi
+  else
+    confirm_dangerous "Configure rEFInd to also boot Linux directly from /boot (kept alongside the existing GRUB chainload entry, so you can test it before removing GRUB)?" ENABLE_DIRECT_BOOT && \
+      refind_configure_direct_boot
+  fi
+
+  refind_print_summary
 }
 
 print_summary() {
