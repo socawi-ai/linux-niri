@@ -36,10 +36,17 @@ ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
 ENABLE_POLARIS_LINGER="${ENABLE_POLARIS_LINGER:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 
+# Snapshot integration assumes Snapper + btrfs are already configured (same
+# "already preconfigured, don't set it up from scratch" stance as Limine
+# itself) — this only wires pacman and the bootloader up to it.
+ENABLE_PACMAN_SNAPSHOTS="${ENABLE_PACMAN_SNAPSHOTS:-1}"
+ENABLE_LIMINE_SNAPSHOT_BOOT="${ENABLE_LIMINE_SNAPSHOT_BOOT:-1}"
+SNAPPER_CONFIG_NAME="${SNAPPER_CONFIG_NAME:-root}"
+
 # Noctalia is installed from the AUR (there is no COPR equivalent). This
 # mirrors the Fedora script's choice of the bleeding-edge "-git" build over
 # the stable release.
-NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-shell-git}"
+NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
 NOCTALIA_GREETER_PACKAGE="${NOCTALIA_GREETER_PACKAGE:-noctalia-greeter-git}"
 NAUTILUS_OPEN_ANY_TERMINAL_PACKAGE="${NAUTILUS_OPEN_ANY_TERMINAL_PACKAGE:-nautilus-open-any-terminal}"
 NAUTILUS_TERMINAL="${NAUTILUS_TERMINAL:-alacritty}"
@@ -97,7 +104,7 @@ else
   COLOR_DIM=""
 fi
 
-TOTAL_SECTIONS=8
+TOTAL_SECTIONS=9
 
 declare -a CHANGES=()
 declare -a WARNINGS=()
@@ -618,6 +625,83 @@ install_steam() {
   log "Installing Steam."
   if pacman_install_optional steam; then
     record_change "Installed Steam."
+  fi
+}
+
+snapper_prerequisites_ok() {
+  have_command snapper || {
+    warn "snapper was not found; skipping pacman/Limine snapshot integration."
+    return 1
+  }
+
+  local root_fstype
+  root_fstype="$(findmnt -n -o FSTYPE / 2>/dev/null || true)"
+  if [[ "$root_fstype" != "btrfs" ]]; then
+    warn "Root filesystem is not btrfs (detected: ${root_fstype:-unknown}); skipping pacman/Limine snapshot integration."
+    return 1
+  fi
+
+  if ! snapper list-configs 2>/dev/null | grep -qE "^${SNAPPER_CONFIG_NAME}[[:space:]]"; then
+    warn "No snapper config named '$SNAPPER_CONFIG_NAME' found; skipping pacman/Limine snapshot integration. Run 'sudo snapper -c $SNAPPER_CONFIG_NAME create-config /' first."
+    return 1
+  fi
+
+  return 0
+}
+
+install_pacman_snapshot_hooks() {
+  [[ "$ENABLE_PACMAN_SNAPSHOTS" == "1" ]] || {
+    log "Automatic pacman snapshots (snap-pac) are disabled."
+    return 0
+  }
+
+  snapper_prerequisites_ok || return 0
+
+  log "Installing snap-pac for automatic pre/post pacman snapshots."
+  if pacman_install_optional snap-pac; then
+    record_change "Installed snap-pac (automatic Snapper snapshots on every pacman transaction)."
+  fi
+}
+
+install_limine_snapshot_boot() {
+  [[ "$ENABLE_LIMINE_SNAPSHOT_BOOT" == "1" ]] || {
+    log "Limine snapshot-boot integration is disabled."
+    return 0
+  }
+
+  snapper_prerequisites_ok || return 0
+
+  log "Installing limine-snapper-sync (AUR) to expose Snapper snapshots as Limine boot entries."
+  aur_install_optional limine-snapper-sync || return 0
+  record_change "Installed limine-snapper-sync."
+
+  if run_sudo systemctl enable --now limine-snapper-sync.service; then
+    record_change "Enabled limine-snapper-sync.service."
+  else
+    warn "Could not enable limine-snapper-sync.service."
+  fi
+
+  # This script never edits limine.conf's entry structure — only checks
+  # whether the snapshot placeholder limine-snapper-sync needs is already
+  # there, and tells you exactly what's missing rather than guessing at a
+  # hand-tuned boot config.
+  local candidate found_conf=""
+  for candidate in /boot/limine.conf /boot/limine/limine.conf /boot/EFI/limine/limine.conf /efi/limine.conf /efi/EFI/limine/limine.conf; do
+    if run_sudo test -f "$candidate"; then
+      found_conf="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$found_conf" ]]; then
+    warn "Could not locate limine.conf to check for a Snapshots placeholder. limine-snapper-sync needs a '//Snapshots' (nested inside your OS entry) or '/Snapshots' (top-level) block added to it manually — see https://gitlab.com/Zesko/limine-snapper-sync for the exact syntax."
+    return 0
+  fi
+
+  if run_sudo grep -qE '^[[:space:]]*/{1,2}Snapshots[[:space:]]*$' "$found_conf"; then
+    log "Snapshots placeholder already present in $found_conf."
+  else
+    warn "$found_conf has no '//Snapshots' or '/Snapshots' placeholder yet. limine-snapper-sync cannot add snapshot boot entries until one is added manually inside your OS entry block (or as a top-level '/Snapshots' block) — this script does not edit limine.conf's entry structure automatically to avoid corrupting a hand-tuned boot config. See https://gitlab.com/Zesko/limine-snapper-sync for the exact syntax for your setup."
   fi
 }
 
@@ -1288,6 +1372,10 @@ main() {
 
   section "Default apps"
   install_default_apps
+
+  section "Snapshots"
+  install_pacman_snapshot_hooks
+  install_limine_snapshot_boot
 
   section "Noctalia"
   install_noctalia_packages
