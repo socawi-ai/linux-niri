@@ -1,0 +1,52 @@
+layout {
+    // 16px gaps: niri's default, and comfortable on a 3440x1440 ultrawide.
+    gaps 16
+
+    // Don't constantly re-center, but center when columns overflow,
+    // and center a lone column instead of pinning it to the left.
+    center-focused-column "on-overflow"
+    always-center-single-column
+
+    background-color "transparent"
+
+    // niri sizes columns gap-aware, so proportion 1/3 fits exactly
+    // 3 windows on a 3440px-wide screen regardless of the gaps setting.
+    default-column-width {
+        proportion 0.33333
+    }
+
+    preset-column-widths {
+        proportion 0.25    // 4 columns
+        proportion 0.33333 // 3 columns (default)
+        proportion 0.5     // 2 columns
+        proportion 0.66667 // main + side column
+        proportion 0.75    // big focused column
+    }
+
+    preset-window-heights {
+        // Half-height stack.
+        proportion 0.5
+
+        // Useful for terminals/chat/log windows.
+        proportion 0.66667
+    }
+
+    // Use a visible focus ring on ultrawide so the active window is obvious.
+    // Fractional widths are valid; niri rounds them to physical pixels based on output scale. 
+    // Width 2 is more legible than 0.5 at 3440x1440.
+    focus-ring {
+        on
+        width 2
+        active-color "#89b4fa70"
+        inactive-color "#ffffff00"
+    }
+
+    // Keep borders subtle. Border affects window size, focus-ring does not.
+    border {
+        on
+        width 1
+        active-color "#cdd6f433"
+        inactive-color "#ffffff08"
+        urgent-color "#f38ba880"
+    }
+}

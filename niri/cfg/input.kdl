@@ -1,0 +1,24 @@
+// ────────────── Input Configuration ──────────────
+// https://github.com/YaLTeR/niri/wiki/Configuration:-Input
+input {
+    keyboard {
+        xkb {
+            layout "se"
+            variant "mac"
+            options "lv3:lalt_switch"
+        }
+        numlock
+    }
+    touchpad {
+        tap
+        natural-scroll
+    }
+    mouse {
+    }
+    workspace-auto-back-and-forth
+
+    // Hover to focus a window; max-scroll-amount="0%" keeps it from
+    // scrolling the view to reveal off-screen windows, only refocusing
+    // whatever is already visible.
+    focus-follows-mouse max-scroll-amount="0%"
+}
