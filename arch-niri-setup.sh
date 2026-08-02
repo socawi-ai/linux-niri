@@ -42,6 +42,9 @@ DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}
 ENABLE_PACMAN_SNAPSHOTS="${ENABLE_PACMAN_SNAPSHOTS:-1}"
 ENABLE_LIMINE_SNAPSHOT_BOOT="${ENABLE_LIMINE_SNAPSHOT_BOOT:-1}"
 SNAPPER_CONFIG_NAME="${SNAPPER_CONFIG_NAME:-root}"
+# Explicit override if find_limine_conf() can't locate limine.conf on its own
+# (unusual ESP mount point or layout).
+LIMINE_CONF_PATH="${LIMINE_CONF_PATH:-}"
 
 # Noctalia is installed from the AUR (there is no COPR equivalent). This
 # mirrors the Fedora script's choice of the bleeding-edge "-git" build over
@@ -663,6 +666,37 @@ install_pacman_snapshot_hooks() {
   fi
 }
 
+find_limine_conf() {
+  if [[ -n "$LIMINE_CONF_PATH" ]]; then
+    if run_sudo test -f "$LIMINE_CONF_PATH"; then
+      printf '%s\n' "$LIMINE_CONF_PATH"
+      return 0
+    fi
+    warn "LIMINE_CONF_PATH=$LIMINE_CONF_PATH does not exist; falling back to searching for it."
+  fi
+
+  # Search actual mount points rather than guessing a fixed list of paths —
+  # ESP layout varies a lot (mounted at /boot, /boot/efi, /efi, or elsewhere;
+  # limine.conf directly at the root or nested in limine/ or EFI/limine/).
+  local roots=(/boot /boot/efi /efi)
+  local vfat_target
+  while IFS= read -r vfat_target; do
+    [[ -n "$vfat_target" ]] || continue
+    roots+=("$vfat_target")
+  done < <(findmnt -rn -o TARGET --types vfat 2>/dev/null || true)
+
+  local root hit name
+  for name in limine.conf limine.cfg; do
+    for root in "${roots[@]}"; do
+      [[ -d "$root" ]] || continue
+      hit="$(run_sudo find "$root" -maxdepth 4 -iname "$name" 2>/dev/null | head -1)"
+      [[ -n "$hit" ]] && { printf '%s\n' "$hit"; return 0; }
+    done
+  done
+
+  return 1
+}
+
 install_limine_snapshot_boot() {
   [[ "$ENABLE_LIMINE_SNAPSHOT_BOOT" == "1" ]] || {
     log "Limine snapshot-boot integration is disabled."
@@ -685,16 +719,11 @@ install_limine_snapshot_boot() {
   # whether the snapshot placeholder limine-snapper-sync needs is already
   # there, and tells you exactly what's missing rather than guessing at a
   # hand-tuned boot config.
-  local candidate found_conf=""
-  for candidate in /boot/limine.conf /boot/limine/limine.conf /boot/EFI/limine/limine.conf /efi/limine.conf /efi/EFI/limine/limine.conf; do
-    if run_sudo test -f "$candidate"; then
-      found_conf="$candidate"
-      break
-    fi
-  done
+  local found_conf
+  found_conf="$(find_limine_conf || true)"
 
   if [[ -z "$found_conf" ]]; then
-    warn "Could not locate limine.conf to check for a Snapshots placeholder. limine-snapper-sync needs a '//Snapshots' (nested inside your OS entry) or '/Snapshots' (top-level) block added to it manually — see https://gitlab.com/Zesko/limine-snapper-sync for the exact syntax."
+    warn "Could not locate limine.conf (searched /boot, /boot/efi, /efi, and any mounted vfat filesystem) to check for a Snapshots placeholder. Set LIMINE_CONF_PATH to its exact location if it's somewhere unusual. limine-snapper-sync needs a '//Snapshots' (nested inside your OS entry) or '/Snapshots' (top-level) block added to it manually — see https://gitlab.com/Zesko/limine-snapper-sync for the exact syntax."
     return 0
   fi
 
