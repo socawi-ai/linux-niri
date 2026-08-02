@@ -727,12 +727,16 @@ install_limine_snapshot_boot() {
 
   # We already know exactly where limine.conf lives — configure
   # limine-snapper-sync to use that ESP mountpoint directly instead of
-  # making it re-run its own auto-detection at every sync.
+  # making it re-run its own auto-detection at every sync. This has to go
+  # in /etc/default/limine specifically: it's the tool's primary config
+  # file, and fully shadows /etc/limine-snapper-sync.conf if both exist —
+  # writing only to the latter silently does nothing when the former is
+  # already present (e.g. from an archinstall-managed Limine setup).
   local esp_path
   esp_path="$(findmnt -T "$found_conf" -n -o TARGET 2>/dev/null || true)"
   if [[ -n "$esp_path" ]]; then
-    upsert_conf_key /etc/limine-snapper-sync.conf ESP_PATH "$esp_path"
-    record_change "Configured limine-snapper-sync ESP_PATH=$esp_path in /etc/limine-snapper-sync.conf."
+    upsert_conf_key /etc/default/limine ESP_PATH "$esp_path"
+    record_change "Configured limine-snapper-sync ESP_PATH=$esp_path in /etc/default/limine."
   else
     warn "Could not determine the mountpoint backing $found_conf; leaving ESP_PATH to limine-snapper-sync's own auto-detection."
   fi

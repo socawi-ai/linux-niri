@@ -85,8 +85,10 @@ to pacman/AUR and an already-installed Limine bootloader:
   missing the `/Snapshots` placeholder `limine-snapper-sync` needs, the
   script backs it up and appends a top-level `/Snapshots` block (safe —
   doesn't touch any existing entry) rather than leaving it broken. It also
-  writes the confirmed ESP mountpoint into `/etc/limine-snapper-sync.conf`
-  as `ESP_PATH`, instead of leaving that to the tool's own auto-detection.
+  writes the confirmed ESP mountpoint into `/etc/default/limine` as
+  `ESP_PATH` (the tool's primary config file — it silently ignores
+  `/etc/limine-snapper-sync.conf` if this one already exists), instead of
+  leaving that to the tool's own auto-detection.
 
 An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
 is bootstrapped automatically from the AUR itself if not already installed.
