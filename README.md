@@ -64,7 +64,10 @@ env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
 ## Arch Linux
 
 `arch-niri-setup.sh` installs the same desktop as the Fedora script, adapted
-to pacman/AUR and an already-installed Limine bootloader:
+to pacman/AUR. It never touches the bootloader (whatever it is — Limine,
+rEFInd, GRUB, etc.), Plymouth, `mkinitcpio` HOOKS, or kernel-cmdline
+settings; all of that is assumed already installed and preconfigured (e.g.
+via `archinstall`):
 
 - Niri, greetd, Alacritty, Nautilus, Fish, Firefox, PipeWire, pavucontrol,
   desktop portals, GTK/Qt Wayland support — all from the official repos
@@ -81,11 +84,6 @@ to pacman/AUR and an already-installed Limine bootloader:
 
 An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
 is bootstrapped automatically from the AUR itself if not already installed.
-
-Limine itself is otherwise assumed already installed and preconfigured (e.g.
-via `archinstall`), which is also assumed to already own boot splash —
-Plymouth, `mkinitcpio` HOOKS, and kernel-cmdline changes are all out of
-scope for the same reason.
 
 It downloads the same repo configs and wallpapers as the Fedora script (see
 above).
