@@ -58,12 +58,21 @@ REFIND_VOLUME_ICON_SOURCE="${REFIND_VOLUME_ICON_SOURCE:-icons/os_arch.png}"
 REFIND_VOLUME_ICON_DEST="${REFIND_VOLUME_ICON_DEST:-/boot/.VolumeIcon.png}"
 
 # Hardware-specific quirk, not a universal need: many boards' watchdog chips
-# (Intel iTCO_wdt, AMD sp5100_tco, etc.) can't be cleanly disarmed on
-# shutdown, so the kernel logs "watchdog did not stop!" every time — harmless
-# but noisy. Only applies to a non-UKI rEFInd setup, since that's where the
-# kernel cmdline lives in a plain-text refind_linux.conf. Set
-# DISABLE_HARDWARE_WATCHDOG=0 if your hardware doesn't hit this.
+# can't be cleanly disarmed on shutdown, so the kernel logs "watchdog did not
+# stop!" every time — harmless but noisy. Set DISABLE_HARDWARE_WATCHDOG=0 if
+# your hardware doesn't hit this.
+#
+# nowatchdog (kernel cmdline) only disables the kernel's own lockup NMI
+# detector — it does NOT reliably stop a hardware watchdog timer chip from
+# arming in the first place. Blacklisting the actual driver module is what
+# stops the shutdown warning; nowatchdog is added too as a harmless
+# companion setting. The two listed below cover the large majority of
+# desktop Intel/AMD chipsets — check `dmesg | grep -i watchdog` on your
+# machine if yours isn't one of these and add it to the list.
 DISABLE_HARDWARE_WATCHDOG="${DISABLE_HARDWARE_WATCHDOG:-1}"
+WATCHDOG_MODULES_TO_BLACKLIST="${WATCHDOG_MODULES_TO_BLACKLIST:-iTCO_wdt iTCO_vendor_support sp5100_tco}"
+# Only applies to a non-UKI rEFInd setup, since that's where the kernel
+# cmdline lives in a plain-text refind_linux.conf.
 REFIND_LINUX_CONF_PATH="${REFIND_LINUX_CONF_PATH:-/boot/refind_linux.conf}"
 
 # Noctalia is installed from the AUR (there is no COPR equivalent). This
@@ -886,6 +895,16 @@ disable_hardware_watchdog() {
     log "Hardware watchdog disabling is disabled."
     return 0
   }
+
+  if [[ -n "$WATCHDOG_MODULES_TO_BLACKLIST" ]]; then
+    local module blacklist_lines=""
+    for module in $WATCHDOG_MODULES_TO_BLACKLIST; do
+      blacklist_lines+="blacklist $module"$'\n'
+    done
+    printf '%s' "$blacklist_lines" | write_system_file /etc/modprobe.d/watchdog-blacklist.conf 0644
+    log "Blacklisted hardware watchdog modules: $WATCHDOG_MODULES_TO_BLACKLIST."
+    record_change "Blacklisted hardware watchdog modules ($WATCHDOG_MODULES_TO_BLACKLIST) in /etc/modprobe.d/watchdog-blacklist.conf. Takes effect on next boot — blacklisting doesn't unload an already-loaded module."
+  fi
 
   local path="$REFIND_LINUX_CONF_PATH"
   run_sudo test -f "$path" || {

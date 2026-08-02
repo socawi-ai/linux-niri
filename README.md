@@ -92,9 +92,14 @@ preconfigured (e.g. via `archinstall`):
   than a generic Linux icon. Skipped gracefully if `refind.conf` can't be
   found (e.g. a different bootloader is in use) — set `INSTALL_REFIND_THEME=0`
   to disable it outright.
-- `nowatchdog` added to every boot option line in `/boot/refind_linux.conf`
-  (non-UKI rEFInd only), suppressing the harmless but noisy "watchdog did not
-  stop" shutdown warning some hardware watchdog chips produce. This is a
+- The hardware watchdog modules most likely to cause the harmless but noisy
+  "watchdog did not stop" shutdown warning (`iTCO_wdt` / `iTCO_vendor_support`
+  on Intel, `sp5100_tco` on AMD — override via `WATCHDOG_MODULES_TO_BLACKLIST`
+  if yours differs) are blacklisted via `/etc/modprobe.d/watchdog-blacklist.conf`.
+  `nowatchdog` is also added to every boot option line in
+  `/boot/refind_linux.conf` (non-UKI rEFInd only) as a harmless companion
+  setting — note that `nowatchdog` alone does **not** stop the hardware
+  watchdog from arming, only the module blacklist does that. This is a
   hardware-specific tweak, not a universal need — set
   `DISABLE_HARDWARE_WATCHDOG=0` if your machine doesn't hit it.
 
