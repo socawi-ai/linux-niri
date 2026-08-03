@@ -34,6 +34,17 @@ LOCALSEND_FLATPAK_ID="${LOCALSEND_FLATPAK_ID:-org.localsend.localsend_app}"
 INSTALL_PROTONUP_QT="${INSTALL_PROTONUP_QT:-1}"
 PROTONUP_QT_FLATPAK_ID="${PROTONUP_QT_FLATPAK_ID:-net.davidotek.pupgui2}"
 INSTALL_STEAM="${INSTALL_STEAM:-1}"
+# Steam/Proton games need the 32-bit (lib32) Mesa/Vulkan stack, not just the
+# native 64-bit one — without it most games fail to launch at all. Vendor
+# driver packages are picked automatically from `lspci` (see
+# detect_gpu_vendors()); set to 0 if you'd rather manage graphics drivers
+# yourself.
+INSTALL_STEAM_GRAPHICS_DEPS="${INSTALL_STEAM_GRAPHICS_DEPS:-1}"
+# Micro-compositor Valve ships on the Steam Deck; lets Proton games run at a
+# fixed resolution/scale and get their own fullscreen surface instead of
+# fighting niri's own window management. Launch a game via Steam's per-game
+# launch options with: gamescope -- %command%
+INSTALL_GAMESCOPE="${INSTALL_GAMESCOPE:-1}"
 INSTALL_VSCODE="${INSTALL_VSCODE:-1}"
 INSTALL_MCMOJAVE_CURSORS="${INSTALL_MCMOJAVE_CURSORS:-1}"
 INSTALL_NAUTILUS_OPEN_ANY_TERMINAL="${INSTALL_NAUTILUS_OPEN_ANY_TERMINAL:-1}"
@@ -786,6 +797,48 @@ install_protonup_qt() {
   fi
 }
 
+detect_gpu_vendors() {
+  have_command lspci || return 0
+
+  local pci_out
+  pci_out="$(lspci -k 2>/dev/null | grep -iE 'VGA compatible controller|3D controller|Display controller' || true)"
+
+  grep -qi 'AMD\|ATI' <<<"$pci_out" && printf 'amd\n'
+  grep -qi 'Intel' <<<"$pci_out" && printf 'intel\n'
+  grep -qi 'NVIDIA' <<<"$pci_out" && printf 'nvidia\n'
+
+  return 0
+}
+
+install_steam_graphics_deps() {
+  [[ "$INSTALL_STEAM_GRAPHICS_DEPS" == "1" ]] || {
+    log "Steam 32-bit graphics dependency installation is disabled."
+    return 0
+  }
+
+  local packages=(lib32-mesa vulkan-icd-loader lib32-vulkan-icd-loader)
+  local vendors=()
+  mapfile -t vendors < <(detect_gpu_vendors)
+
+  if [[ "${#vendors[@]}" -eq 0 ]]; then
+    warn "Could not detect a GPU vendor via lspci; installing AMD and Intel Vulkan drivers as a safe default. If this machine has an Nvidia GPU, install nvidia-utils and lib32-nvidia-utils manually."
+    vendors=(amd intel)
+  fi
+
+  local vendor
+  for vendor in "${vendors[@]}"; do
+    case "$vendor" in
+      amd) packages+=(vulkan-radeon lib32-vulkan-radeon) ;;
+      intel) packages+=(vulkan-intel lib32-vulkan-intel) ;;
+      nvidia) packages+=(nvidia-utils lib32-nvidia-utils) ;;
+    esac
+  done
+
+  log "Installing 32-bit Mesa/Vulkan packages needed for Steam/Proton games: ${packages[*]}."
+  pacman_install_best_effort "${packages[@]}"
+  record_change "Installed 32-bit graphics packages for Steam gaming (${packages[*]})."
+}
+
 install_steam() {
   [[ "$INSTALL_STEAM" == "1" ]] || {
     log "Steam installation is disabled."
@@ -793,10 +846,25 @@ install_steam() {
   }
 
   enable_multilib
+  install_steam_graphics_deps
 
   log "Installing Steam."
   if pacman_install_optional steam; then
     record_change "Installed Steam."
+  fi
+
+  install_gamescope
+}
+
+install_gamescope() {
+  [[ "$INSTALL_GAMESCOPE" == "1" ]] || {
+    log "gamescope installation is disabled."
+    return 0
+  }
+
+  log "Installing gamescope."
+  if pacman_install_optional gamescope; then
+    record_change "Installed gamescope."
   fi
 }
 
