@@ -84,11 +84,11 @@ WATCHDOG_MODULES_TO_BLACKLIST="${WATCHDOG_MODULES_TO_BLACKLIST:-iTCO_wdt iTCO_ve
 # cmdline lives in a plain-text refind_linux.conf.
 REFIND_LINUX_CONF_PATH="${REFIND_LINUX_CONF_PATH:-/boot/refind_linux.conf}"
 
-# Noctalia is installed from the AUR (there is no COPR equivalent). This
-# mirrors the Fedora script's choice of the bleeding-edge "-git" build over
-# the stable release.
-NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
-NOCTALIA_GREETER_PACKAGE="${NOCTALIA_GREETER_PACKAGE:-noctalia-greeter-git}"
+# Noctalia is installed from the AUR (there is no COPR equivalent). Uses the
+# stable release, not the bleeding-edge "-git" build (unlike the Fedora
+# script, which still tracks noctalia-git).
+NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia}"
+NOCTALIA_GREETER_PACKAGE="${NOCTALIA_GREETER_PACKAGE:-noctalia-greeter}"
 NAUTILUS_OPEN_ANY_TERMINAL_PACKAGE="${NAUTILUS_OPEN_ANY_TERMINAL_PACKAGE:-nautilus-open-any-terminal}"
 NAUTILUS_TERMINAL="${NAUTILUS_TERMINAL:-alacritty}"
 VSCODE_PACKAGE="${VSCODE_PACKAGE:-visual-studio-code-bin}"
