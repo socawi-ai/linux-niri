@@ -24,12 +24,23 @@ AUR_HELPER="${AUR_HELPER:-paru}"
 
 ENABLE_GREETD="${ENABLE_GREETD:-1}"
 ENABLE_MULTILIB="${ENABLE_MULTILIB:-1}"
+INSTALL_FLATPAK="${INSTALL_FLATPAK:-1}"
+ADD_FLATHUB_REMOTE="${ADD_FLATHUB_REMOTE:-1}"
+FLATHUB_REMOTE_URL="${FLATHUB_REMOTE_URL:-https://dl.flathub.org/repo/flathub.flatpakrepo}"
+INSTALL_PROTON_MAIL="${INSTALL_PROTON_MAIL:-1}"
+PROTON_MAIL_FLATPAK_ID="${PROTON_MAIL_FLATPAK_ID:-me.proton.Mail}"
+INSTALL_LOCALSEND="${INSTALL_LOCALSEND:-1}"
+LOCALSEND_FLATPAK_ID="${LOCALSEND_FLATPAK_ID:-org.localsend.localsend_app}"
+INSTALL_PROTONUP_QT="${INSTALL_PROTONUP_QT:-1}"
+PROTONUP_QT_FLATPAK_ID="${PROTONUP_QT_FLATPAK_ID:-net.davidotek.pupgui2}"
 INSTALL_STEAM="${INSTALL_STEAM:-1}"
 INSTALL_VSCODE="${INSTALL_VSCODE:-1}"
 INSTALL_MCMOJAVE_CURSORS="${INSTALL_MCMOJAVE_CURSORS:-1}"
 INSTALL_NAUTILUS_OPEN_ANY_TERMINAL="${INSTALL_NAUTILUS_OPEN_ANY_TERMINAL:-1}"
 INSTALL_LACT="${INSTALL_LACT:-1}"
 ENABLE_LACT_SERVICE="${ENABLE_LACT_SERVICE:-1}"
+INSTALL_ARCH_UPDATE="${INSTALL_ARCH_UPDATE:-1}"
+ENABLE_ARCH_UPDATE_TIMER="${ENABLE_ARCH_UPDATE_TIMER:-1}"
 INSTALL_POLARIS="${INSTALL_POLARIS:-1}"
 SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
 ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
@@ -84,6 +95,11 @@ VSCODE_PACKAGE="${VSCODE_PACKAGE:-visual-studio-code-bin}"
 # LACT is in the official Arch repos as of mid-2026 (no COPR/AUR needed,
 # unlike Fedora).
 LACT_PACKAGE="${LACT_PACKAGE:-lact}"
+# arch-update is AUR-only (no official-repo build). Its optional deps include
+# the configured AUR helper and flatpak, so it picks up AUR/Flatpak update
+# checks automatically once those are present — nothing extra to configure
+# here for that.
+ARCH_UPDATE_PACKAGE="${ARCH_UPDATE_PACKAGE:-arch-update}"
 # The mcmojave-cursors AUR package installs to /usr/share/icons/mcmojave-cursors
 # (lowercase, matching the pkgname) regardless of TARGET_USER, so no per-user
 # install step or clone directory is needed here.
@@ -596,7 +612,6 @@ install_arch_packages() {
     firefox
     xwayland-satellite
     nautilus
-    gnome-software
     xdg-user-dirs
     xdg-utils
     file-roller
@@ -676,6 +691,99 @@ enable_multilib() {
 
   run_sudo "$PACMAN_BIN" -Sy || warn "pacman -Sy failed after enabling multilib."
   record_change "Enabled the multilib repository."
+}
+
+install_flatpak() {
+  [[ "$INSTALL_FLATPAK" == "1" ]] || {
+    log "Flatpak installation is disabled."
+    return 0
+  }
+
+  log "Installing Flatpak."
+  if ! pacman_install_optional flatpak; then
+    return 0
+  fi
+  record_change "Installed Flatpak."
+
+  [[ "$ADD_FLATHUB_REMOTE" == "1" ]] || {
+    log "Flathub remote setup is disabled."
+    return 0
+  }
+
+  # System-wide (not --user), matching pacman's system-wide package scope
+  # used everywhere else in this script — makes Flathub apps available to
+  # any user on the machine, not just TARGET_USER.
+  if run_sudo flatpak remote-add --if-not-exists flathub "$FLATHUB_REMOTE_URL"; then
+    record_change "Added the Flathub remote ($FLATHUB_REMOTE_URL)."
+  else
+    warn "Could not add the Flathub remote."
+  fi
+}
+
+install_proton_mail() {
+  [[ "$INSTALL_PROTON_MAIL" == "1" ]] || {
+    log "Proton Mail installation is disabled."
+    return 0
+  }
+
+  if ! have_command flatpak; then
+    warn "Flatpak is not installed; cannot install Proton Mail ($PROTON_MAIL_FLATPAK_ID)."
+    return 0
+  fi
+
+  log "Installing Proton Mail ($PROTON_MAIL_FLATPAK_ID) from Flathub."
+  local args=(install flathub "$PROTON_MAIL_FLATPAK_ID")
+  [[ "$ASSUME_YES" == "1" ]] && args+=(-y)
+
+  if run_sudo flatpak "${args[@]}"; then
+    record_change "Installed Proton Mail ($PROTON_MAIL_FLATPAK_ID) from Flathub."
+  else
+    warn "Could not install Proton Mail from Flathub."
+  fi
+}
+
+install_localsend() {
+  [[ "$INSTALL_LOCALSEND" == "1" ]] || {
+    log "LocalSend installation is disabled."
+    return 0
+  }
+
+  if ! have_command flatpak; then
+    warn "Flatpak is not installed; cannot install LocalSend ($LOCALSEND_FLATPAK_ID)."
+    return 0
+  fi
+
+  log "Installing LocalSend ($LOCALSEND_FLATPAK_ID) from Flathub."
+  local args=(install flathub "$LOCALSEND_FLATPAK_ID")
+  [[ "$ASSUME_YES" == "1" ]] && args+=(-y)
+
+  if run_sudo flatpak "${args[@]}"; then
+    record_change "Installed LocalSend ($LOCALSEND_FLATPAK_ID) from Flathub."
+  else
+    warn "Could not install LocalSend from Flathub."
+  fi
+}
+
+install_protonup_qt() {
+  [[ "$INSTALL_PROTONUP_QT" == "1" ]] || {
+    log "ProtonUp-Qt installation is disabled."
+    return 0
+  }
+
+  if ! have_command flatpak; then
+    warn "Flatpak is not installed; cannot install ProtonUp-Qt ($PROTONUP_QT_FLATPAK_ID)."
+    return 0
+  fi
+
+  log "Installing ProtonUp-Qt ($PROTONUP_QT_FLATPAK_ID) from Flathub."
+  local args=(install flathub "$PROTONUP_QT_FLATPAK_ID")
+  [[ "$ASSUME_YES" == "1" ]] && args+=(-y)
+
+  if run_sudo flatpak "${args[@]}"; then
+    record_change "Installed ProtonUp-Qt ($PROTONUP_QT_FLATPAK_ID) from Flathub."
+  else
+    warn "Could not install ProtonUp-Qt from Flathub."
+  fi
 }
 
 install_steam() {
@@ -1001,6 +1109,27 @@ install_lact() {
   fi
 }
 
+install_arch_update() {
+  [[ "$INSTALL_ARCH_UPDATE" == "1" ]] || {
+    log "arch-update installation is disabled."
+    return 0
+  }
+
+  if ! aur_install_optional "$ARCH_UPDATE_PACKAGE"; then
+    return 0
+  fi
+  record_change "Installed arch-update ($ARCH_UPDATE_PACKAGE) for pacman/AUR/Flatpak update notifications."
+
+  [[ "$ENABLE_ARCH_UPDATE_TIMER" == "1" ]] || {
+    log "arch-update background timer autostart is disabled."
+    return 0
+  }
+
+  if set_systemd_user_service arch-update.timer; then
+    record_change "Enabled the arch-update background update-check timer."
+  fi
+}
+
 download_as_user() {
   local url="$1"
   local dest="$2"
@@ -1100,7 +1229,11 @@ install_default_apps() {
   install_mcmojave_cursors
   install_nautilus_open_any_terminal
   install_lact
+  install_arch_update
   install_polaris
+  install_proton_mail
+  install_localsend
+  install_protonup_qt
 }
 
 install_noctalia_packages() {
@@ -1543,6 +1676,7 @@ main() {
 
   section "Base packages"
   install_arch_packages
+  install_flatpak
   ensure_aur_helper
 
   section "Default apps"
