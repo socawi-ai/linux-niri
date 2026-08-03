@@ -7,43 +7,21 @@ are prepared to repair.
 
 Run as your normal user, not with `sudo`. The scripts ask for sudo when needed.
 
-All scripts below work the same on a terminal-only machine (SSH session,
-bare TTY console — no browser needed) as they do in a desktop terminal:
-download the script, mark it executable, then run it. 
-
+Works the same over SSH/bare TTY as in a desktop terminal: download, `chmod +x`, run.
 
 ## Fedora
 
 `fedora-niri-setup.sh` installs and configures:
 
-- Niri
-- Noctalia v5
-- Noctalia Greeter
-- greetd
-- Alacritty
-- Nautilus
-- Fish
-- Firefox
-- PipeWire
-- pavucontrol
-- desktop portals
-- GTK/Qt Wayland support
-- McMojave cursors
-- Nautilus Open Any Terminal, set to Alacritty
-- LACT, with the `lactd` service enabled, for AMD/Nvidia/Intel GPU control
-- VS Code
-- Steam 
-- Polaris with host setup and user-service autostart
-- Plymouth spinner
+- Niri, greetd, Noctalia v5 + Noctalia Greeter
+- Alacritty, Nautilus, Fish, Firefox
+- PipeWire, pavucontrol, desktop portals, GTK/Qt Wayland support
+- McMojave cursors, Nautilus Open Any Terminal (set to Alacritty)
+- LACT (`lactd` service), for AMD/Nvidia/Intel GPU control
+- VS Code, Steam, Polaris (host setup + autostart), Plymouth spinner
 
-It also downloads this repo's configs and wallpapers:
-
-- `alacritty/` -> `~/.config/alacritty`
-- `niri/` -> `~/.config/niri`
-- `polaris/` -> `~/.config/polaris`
-- `noctalia/` -> `~/.local/state/noctalia`
-- `wallpapers/` -> the user's localized pictures folder (shipped as
-  `wallpapers/wallpapers.tar.xz`; the script extracts it into place)
+It also deploys this repo's configs and wallpapers to `~/.config`,
+`~/.local/state`, and the user's pictures folder.
 
 Run:
 
@@ -53,73 +31,49 @@ chmod +x fedora-niri-setup.sh
 ./fedora-niri-setup.sh
 ```
 
-Unattended run:
+Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh`
+
+## Fedora rEFInd boot theme (optional)
+
+`fedora-refind-setup.sh` gives a UEFI Fedora machine a themed
+[rEFInd](https://www.rodsbooks.com/refind/) boot screen
+([rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils)). Additive and
+standalone: installs rEFInd as a new firmware boot entry alongside Fedora's
+existing one, chainloads into Fedora's own shim/GRUB/kernel chain, and hides
+GRUB's menu so rEFInd is the only one you see.
+
+Run:
 
 ```bash
-env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/fedora-refind-setup.sh -o fedora-refind-setup.sh
+chmod +x fedora-refind-setup.sh
+./fedora-refind-setup.sh
 ```
 
 ## Arch Linux
 
-`arch-niri-setup.sh` installs the same desktop as the Fedora script, adapted
-to pacman/AUR. It never installs the bootloader itself (whatever it is —
-Limine, rEFInd, GRUB, etc.), never touches Plymouth or `mkinitcpio` HOOKS,
-and assumes all of that is already installed and preconfigured (e.g. via
-`archinstall`). The one exception is rEFInd: if `refind.conf` is found, the
-script applies a visual theme to it and (non-UKI setups only) adds the
-`nowatchdog` kernel-cmdline parameter to `refind_linux.conf` — see the rEFInd
-theme and hardware watchdog bullets below. Nothing is touched if rEFInd isn't
-in use, and both of these are skippable (`INSTALL_REFIND_THEME=0`,
-`DISABLE_HARDWARE_WATCHDOG=0`):
+`arch-niri-setup.sh` installs the same desktop, adapted to pacman/AUR. It
+assumes the bootloader is already installed and preconfigured (e.g. via
+`archinstall`) and never touches it — except rEFInd, which it themes if
+present (skipped gracefully otherwise).
 
 - Niri, greetd, Alacritty, Nautilus, Fish, Firefox, PipeWire, pavucontrol,
-  desktop portals, GTK/Qt Wayland support — all from the official repos
-- Flatpak, with the Flathub remote added system-wide (set `INSTALL_FLATPAK=0`
-  to skip, or `ADD_FLATHUB_REMOTE=0` to install Flatpak without adding
-  Flathub)
-- Proton Mail, LocalSend, and ProtonUp-Qt, from Flathub (each toggleable via
-  `INSTALL_PROTON_MAIL`, `INSTALL_LOCALSEND`, `INSTALL_PROTONUP_QT`)
-- [arch-update](https://github.com/Antiz96/arch-update), from the AUR, with
-  its background update-check timer enabled (`INSTALL_ARCH_UPDATE=0` to skip,
-  `ENABLE_ARCH_UPDATE_TIMER=0` to install it without the timer) — notifies
-  on available pacman, AUR, and Flatpak updates
-- Noctalia v5 and Noctalia Greeter, from the AUR (`noctalia` /
-  `noctalia-greeter`, the stable releases — unlike the Fedora script, which
-  still tracks the bleeding-edge `noctalia-git` COPR build)
-- McMojave cursors, from the AUR (`mcmojave-cursors`)
-- Nautilus Open Any Terminal (AUR), set to Alacritty
-- LACT, with the `lactd` service enabled, for AMD/Nvidia/Intel GPU control
-  (official repo — no AUR needed)
-- VS Code (AUR, `visual-studio-code-bin`)
-- Steam, via the `multilib` repo (enabled automatically if needed)
-- Polaris with host setup and user-service autostart.
-- The [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) visual theme, if
-  rEFInd is in use: `refind.conf` is located by searching `/boot`,
-  `/boot/efi`, `/efi`, and any mounted vfat filesystem (or `REFIND_CONF_PATH`
-  if set explicitly), the theme is cloned into `themes/rEFInd-nils` next to
-  it, and a matching `include` line is appended to `refind.conf` if not
-  already present. If not on UKI, it also copies the theme's
-  `icons/os_arch.png` to `/boot/.VolumeIcon.png` — the file rEFInd looks for
-  to show a proper Arch icon on loose-kernel (non-UKI) boot entries, rather
-  than a generic Linux icon. Skipped gracefully if `refind.conf` can't be
-  found (e.g. a different bootloader is in use) — set `INSTALL_REFIND_THEME=0`
-  to disable it outright.
-- The hardware watchdog modules most likely to cause the harmless but noisy
-  "watchdog did not stop" shutdown warning (`iTCO_wdt` / `iTCO_vendor_support`
-  on Intel, `sp5100_tco` on AMD — override via `WATCHDOG_MODULES_TO_BLACKLIST`
-  if yours differs) are blacklisted via `/etc/modprobe.d/watchdog-blacklist.conf`.
-  `nowatchdog` is also added to every boot option line in
-  `/boot/refind_linux.conf` (non-UKI rEFInd only) as a harmless companion
-  setting — note that `nowatchdog` alone does **not** stop the hardware
-  watchdog from arming, only the module blacklist does that. This is a
-  hardware-specific tweak, not a universal need — set
-  `DISABLE_HARDWARE_WATCHDOG=0` if your machine doesn't hit it.
+  desktop portals, GTK/Qt Wayland support — official repos
+- Flatpak + Flathub; Proton Mail, LocalSend, ProtonUp-Qt from Flathub
+- [arch-update](https://github.com/Antiz96/arch-update) with its update
+  timer, from the AUR
+- Noctalia v5 + Greeter (stable, AUR), McMojave cursors (AUR), Nautilus Open
+  Any Terminal (AUR), LACT (official repo), VS Code (AUR)
+- Steam (via `multilib`), Polaris (host setup + autostart)
+- [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) theme, if rEFInd is
+  detected — plus a hardware-watchdog module blacklist to silence a common
+  "watchdog did not stop" shutdown warning
 
-An AUR helper (`paru` by default; `yay` also supported via `AUR_HELPER=yay`)
-is bootstrapped automatically from the AUR itself if not already installed.
+An AUR helper (`paru` by default, `yay` supported) is bootstrapped
+automatically if missing. Most behaviors above are toggleable via env vars —
+see the script header for the full list.
 
-It downloads the same repo configs and wallpapers as the Fedora script (see
-above).
+It downloads the same repo configs and wallpapers as the Fedora script.
 
 Run:
 
@@ -129,19 +83,15 @@ chmod +x arch-niri-setup.sh
 ./arch-niri-setup.sh
 ```
 
-Unattended run:
-
-```bash
-env TARGET_USER=your-user ASSUME_YES=1 ./arch-niri-setup.sh
-```
+Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./arch-niri-setup.sh`
 
 ## Backups
 
-The scripts back up most replaced files.
+Each script backs up replaced files before touching them, and writes a
+timestamped log to the user's home directory.
 
 - Fedora: `~/.local/share/fedora-niri-setup/backups/` (user),
   `/var/backups/fedora-niri-setup/` (system)
 - Arch: `~/.local/share/arch-niri-setup/backups/` (user),
   `/var/backups/arch-niri-setup/` (system)
-
-Each run also writes a timestamped log file in the user's home directory.
+- rEFInd setup: `/var/backups/fedora-refind-setup/` (system only)
