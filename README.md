@@ -9,10 +9,8 @@ Run as your normal user, not with `sudo`. The scripts ask for sudo when needed.
 
 All scripts below work the same on a terminal-only machine (SSH session,
 bare TTY console — no browser needed) as they do in a desktop terminal:
-download the script, mark it executable, then run it. This works the same in
-fish, zsh, or bash as your login shell, and the scripts read their yes/no
-prompts from `/dev/tty` directly rather than stdin, so it's safe to run over
-SSH.
+download the script, mark it executable, then run it. 
+
 
 ## Fedora
 
@@ -34,10 +32,9 @@ SSH.
 - Nautilus Open Any Terminal, set to Alacritty
 - LACT, with the `lactd` service enabled, for AMD/Nvidia/Intel GPU control
 - VS Code
-- Steam from RPM Fusion, not Flatpak
+- Steam 
 - Polaris with host setup and user-service autostart
 - Plymouth spinner
-- GRUB timeout
 
 It also downloads this repo's configs and wallpapers:
 
@@ -45,7 +42,8 @@ It also downloads this repo's configs and wallpapers:
 - `niri/` -> `~/.config/niri`
 - `polaris/` -> `~/.config/polaris`
 - `noctalia/` -> `~/.local/state/noctalia`
-- `wallpapers/` -> the user's localized pictures folder
+- `wallpapers/` -> the user's localized pictures folder (shipped as
+  `wallpapers/wallpapers.tar.xz`; the script extracts it into place)
 
 Run:
 
@@ -64,35 +62,37 @@ env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh
 ## Arch Linux
 
 `arch-niri-setup.sh` installs the same desktop as the Fedora script, adapted
-to pacman/AUR. It never installs or configures the bootloader itself
-(whatever it is — Limine, rEFInd, GRUB, etc.), Plymouth, `mkinitcpio` HOOKS,
-or kernel-cmdline settings; all of that is assumed already installed and
-preconfigured (e.g. via `archinstall`):
+to pacman/AUR. It never installs the bootloader itself (whatever it is —
+Limine, rEFInd, GRUB, etc.), never touches Plymouth or `mkinitcpio` HOOKS,
+and assumes all of that is already installed and preconfigured (e.g. via
+`archinstall`). The one exception is rEFInd: if `refind.conf` is found, the
+script applies a visual theme to it and (non-UKI setups only) adds the
+`nowatchdog` kernel-cmdline parameter to `refind_linux.conf` — see the rEFInd
+theme and hardware watchdog bullets below. Nothing is touched if rEFInd isn't
+in use, and both of these are skippable (`INSTALL_REFIND_THEME=0`,
+`DISABLE_HARDWARE_WATCHDOG=0`):
 
 - Niri, greetd, Alacritty, Nautilus, Fish, Firefox, PipeWire, pavucontrol,
   desktop portals, GTK/Qt Wayland support — all from the official repos
-- Noctalia v5 and Noctalia Greeter, from the AUR (`noctalia-git` /
-  `noctalia-greeter-git`, the bleeding-edge variants, matching the Fedora
-  script's COPR choice)
+- Flatpak, with the Flathub remote added system-wide (set `INSTALL_FLATPAK=0`
+  to skip, or `ADD_FLATHUB_REMOTE=0` to install Flatpak without adding
+  Flathub)
+- Proton Mail, LocalSend, and ProtonUp-Qt, from Flathub (each toggleable via
+  `INSTALL_PROTON_MAIL`, `INSTALL_LOCALSEND`, `INSTALL_PROTONUP_QT`)
+- [arch-update](https://github.com/Antiz96/arch-update), from the AUR, with
+  its background update-check timer enabled (`INSTALL_ARCH_UPDATE=0` to skip,
+  `ENABLE_ARCH_UPDATE_TIMER=0` to install it without the timer) — notifies
+  on available pacman, AUR, and Flatpak updates
+- Noctalia v5 and Noctalia Greeter, from the AUR (`noctalia` /
+  `noctalia-greeter`, the stable releases — unlike the Fedora script, which
+  still tracks the bleeding-edge `noctalia-git` COPR build)
 - McMojave cursors, from the AUR (`mcmojave-cursors`)
 - Nautilus Open Any Terminal (AUR), set to Alacritty
 - LACT, with the `lactd` service enabled, for AMD/Nvidia/Intel GPU control
   (official repo — no AUR needed)
 - VS Code (AUR, `visual-studio-code-bin`)
 - Steam, via the `multilib` repo (enabled automatically if needed)
-- Polaris with host setup and user-service autostart. The Arch release
-  package ships with an empty `Icon=` in its `.desktop` file — an upstream
-  bug ([acknowledged in Polaris's own CI
-  config](https://github.com/papi-ux/polaris/blob/master/.github/workflows/opensuse-build.yml)),
-  since the `.desktop` template's `@POLARIS_DESKTOP_ICON@` placeholder is
-  never set by the Arch PKGBUILD — so Polaris shows no icon in the launcher
-  or bar/dock. The script patches `Icon=` back to `polaris` (matching the
-  `polaris.svg` the package does install, under
-  `/usr/share/icons/hicolor/scalable/apps/`) and force-refreshes the hicolor
-  icon cache and desktop database, since pacman's own cache-refresh hook only
-  fires when a whole icon-theme directory appears or disappears, not when a
-  package just adds files to the existing `hicolor` tree. Set
-  `FIX_POLARIS_DESKTOP_ICON=0` to disable it.
+- Polaris with host setup and user-service autostart.
 - The [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) visual theme, if
   rEFInd is in use: `refind.conf` is located by searching `/boot`,
   `/boot/efi`, `/efi`, and any mounted vfat filesystem (or `REFIND_CONF_PATH`
