@@ -116,6 +116,9 @@ GTK_CURSOR_THEME="${GTK_CURSOR_THEME:-$MCMOJAVE_CURSOR_THEME}"
 XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
 WALLPAPER_PARENT_DIR="${WALLPAPER_PARENT_DIR:-}"
 WALLPAPER_SUBDIR="${WALLPAPER_SUBDIR:-wallpapers}"
+# The repo now ships wallpapers as a single archive (smaller Git history than
+# committing every image loose) rather than as loose files in wallpapers/.
+WALLPAPER_ARCHIVE_NAME="${WALLPAPER_ARCHIVE_NAME:-wallpapers.tar.xz}"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_FILE:-$HOME/arch-niri-setup-$TIMESTAMP.log}"
@@ -367,6 +370,25 @@ replace_user_path_with_dir() {
   run_as_user mkdir -p "$(dirname "$dest")"
   run_as_user cp -a "$src" "$dest"
   record_change "Installed $(basename "$dest") config to $dest."
+}
+
+extract_archive_into_user_dir() {
+  # Like replace_user_path_with_dir, but extracts a tar archive into $dest
+  # instead of copying a directory.
+  local archive="$1"
+  local dest="$2"
+  [[ -f "$archive" ]] || die "Expected archive file $archive."
+
+  case "$dest" in
+    "$TARGET_HOME"/*) ;;
+    *) die "Refusing to extract into path outside target home: $dest" ;;
+  esac
+
+  backup_user_path "$dest"
+  run_as_user rm -rf -- "$dest"
+  run_as_user mkdir -p "$dest"
+  run_as_user tar -xf "$archive" -C "$dest"
+  record_change "Extracted $(basename "$archive") into $dest."
 }
 
 merge_user_path_into_dir() {
@@ -1163,11 +1185,20 @@ localized_pictures_dir() {
 }
 
 install_wallpapers() {
-  local pictures_dir
+  local pictures_dir wallpaper_dest archive
   pictures_dir="$(localized_pictures_dir)"
-  log "Installing repo wallpapers into $pictures_dir/$WALLPAPER_SUBDIR."
+  wallpaper_dest="$pictures_dir/$WALLPAPER_SUBDIR"
+  archive="$CONFIG_SOURCE_DIR/wallpapers/$WALLPAPER_ARCHIVE_NAME"
+
   run_as_user mkdir -p "$pictures_dir"
-  replace_user_path_with_dir "$CONFIG_SOURCE_DIR/wallpapers" "$pictures_dir/$WALLPAPER_SUBDIR"
+
+  if [[ -f "$archive" ]]; then
+    log "Extracting repo wallpapers ($WALLPAPER_ARCHIVE_NAME) into $wallpaper_dest."
+    extract_archive_into_user_dir "$archive" "$wallpaper_dest"
+  else
+    log "Installing repo wallpapers into $wallpaper_dest."
+    replace_user_path_with_dir "$CONFIG_SOURCE_DIR/wallpapers" "$wallpaper_dest"
+  fi
 }
 
 detect_connected_outputs() {
