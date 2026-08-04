@@ -4,8 +4,6 @@ input {
     keyboard {
         xkb {
             layout "se"
-            variant "mac"
-            options "lv3:lalt_switch"
         }
         numlock
     }
@@ -16,7 +14,6 @@ input {
     mouse {
     }
     workspace-auto-back-and-forth
-
     // Hover to focus a window; max-scroll-amount="0%" keeps it from
     // scrolling the view to reveal off-screen windows, only refocusing
     // whatever is already visible.
