@@ -57,6 +57,12 @@ window-rule {
     open-focused false
 }
 
+// Steam games launched via the Steam Linux Runtime get app-id "steam_app_<appid>"
+window-rule {
+    match app-id=r"^steam_app_\d+$"
+    open-fullscreen true
+}
+
 // Common dialogs that are awkward as tiled columns.
 window-rule {
     match app-id="org.gnome.Nautilus" title=r".*(Properties|Preferences).*"
