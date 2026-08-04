@@ -18,7 +18,7 @@ Works the same over SSH/bare TTY as in a desktop terminal: download, `chmod +x`,
 - PipeWire, pavucontrol, desktop portals, GTK/Qt Wayland support
 - McMojave cursors, Nautilus Open Any Terminal (set to Alacritty)
 - LACT (`lactd` service), for AMD/Nvidia/Intel GPU control
-- VS Code, Steam, Polaris (host setup + autostart), Plymouth spinner
+- VS Code, Steam, Plymouth spinner
 
 It also deploys this repo's configs and wallpapers to `~/.config`,
 `~/.local/state`, and the user's pictures folder.
@@ -64,7 +64,7 @@ present (skipped gracefully otherwise).
   timer, from the AUR
 - Noctalia v5 + Greeter (stable, AUR), McMojave cursors (AUR), Nautilus Open
   Any Terminal (AUR), LACT (official repo), VS Code (AUR)
-- Steam (via `multilib`), Polaris (host setup + autostart)
+- Steam (via `multilib`)
 - [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) theme, if rEFInd is
   detected — plus a hardware-watchdog module blacklist to silence a common
   "watchdog did not stop" shutdown warning

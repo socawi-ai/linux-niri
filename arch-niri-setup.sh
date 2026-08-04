@@ -52,10 +52,6 @@ INSTALL_LACT="${INSTALL_LACT:-1}"
 ENABLE_LACT_SERVICE="${ENABLE_LACT_SERVICE:-1}"
 INSTALL_ARCH_UPDATE="${INSTALL_ARCH_UPDATE:-1}"
 ENABLE_ARCH_UPDATE_TIMER="${ENABLE_ARCH_UPDATE_TIMER:-1}"
-INSTALL_POLARIS="${INSTALL_POLARIS:-1}"
-SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
-ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
-ENABLE_POLARIS_LINGER="${ENABLE_POLARIS_LINGER:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 
 # rEFInd theme — this script never installs or configures rEFInd itself
@@ -116,17 +112,6 @@ ARCH_UPDATE_PACKAGE="${ARCH_UPDATE_PACKAGE:-arch-update}"
 # install step or clone directory is needed here.
 MCMOJAVE_CURSORS_PACKAGE="${MCMOJAVE_CURSORS_PACKAGE:-mcmojave-cursors}"
 MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-mcmojave-cursors}"
-POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
-# Upstream bug (acknowledged in Polaris's own CI, .github/workflows/opensuse-build.yml):
-# the .desktop template references @POLARIS_DESKTOP_ICON@, but the Arch
-# PKGBUILD's cmake invocation never sets it, so the release package ships
-# Icon= empty and neither the launcher nor bar/dock widgets that read it can
-# resolve an icon. polaris.svg is installed regardless, at
-# /usr/share/icons/hicolor/scalable/apps/polaris.svg, so "polaris" is a
-# correct icon name once Icon= actually points at it.
-FIX_POLARIS_DESKTOP_ICON="${FIX_POLARIS_DESKTOP_ICON:-1}"
-POLARIS_DESKTOP_FILE="${POLARIS_DESKTOP_FILE:-/usr/share/applications/dev.polaris-stream.app.Polaris.desktop}"
-POLARIS_DESKTOP_ICON_NAME="${POLARIS_DESKTOP_ICON_NAME:-polaris}"
 
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
@@ -418,33 +403,6 @@ extract_archive_into_user_dir() {
   record_change "Extracted $(basename "$archive") into $dest."
 }
 
-merge_user_path_into_dir() {
-  # Like replace_user_path_with_dir, but overlays files from $src into $dest
-  # instead of wiping $dest first. Use this for directories that mix
-  # declarative config with an app's own runtime state (logs, caches,
-  # databases, lock files) — a wholesale rm -rf would destroy that state.
-  local src="$1"
-  local dest="$2"
-  [[ -d "$src" ]] || die "Expected directory $src."
-
-  case "$dest" in
-    "$TARGET_HOME"/*) ;;
-    *) die "Refusing to write path outside target home: $dest" ;;
-  esac
-
-  run_as_user mkdir -p "$dest"
-
-  local f rel
-  while IFS= read -r -d '' f; do
-    rel="${f#"$src"/}"
-    backup_user_path "$dest/$rel"
-    run_as_user mkdir -p "$(dirname "$dest/$rel")"
-    run_as_user cp -a "$f" "$dest/$rel"
-  done < <(find "$src" -type f -print0)
-
-  record_change "Merged $(basename "$dest") config into $dest (existing files preserved)."
-}
-
 safe_rm_rf() {
   local path="$1"
   [[ -n "$path" && "$path" != "/" ]] || die "Refusing to remove unsafe path: $path"
@@ -531,17 +489,6 @@ pacman_install_best_effort() {
   fi
 
   return 0
-}
-
-pacman_install_local() {
-  # Installs a local package file (e.g. a downloaded .pkg.tar.zst), analogous
-  # to `dnf install ./foo.rpm` in the Fedora script.
-  local path="$1"
-  local args=(-U)
-
-  [[ "$ASSUME_YES" == "1" ]] && args+=(--noconfirm)
-
-  run_sudo "$PACMAN_BIN" "${args[@]}" "$path"
 }
 
 ensure_aur_helper() {
@@ -888,21 +835,6 @@ set_systemd_user_service() {
   return 1
 }
 
-configure_polaris_autostart() {
-  [[ "$ENABLE_POLARIS_AUTOSTART" == "1" ]] || {
-    log "Polaris autostart is disabled."
-    return 0
-  }
-
-  if [[ "$ENABLE_POLARIS_LINGER" == "1" ]]; then
-    run_sudo loginctl enable-linger "$TARGET_USER" || warn "Could not enable linger for $TARGET_USER."
-  fi
-
-  if set_systemd_user_service polaris.service; then
-    record_change "Enabled Polaris user service autostart."
-  fi
-}
-
 install_vscode() {
   [[ "$INSTALL_VSCODE" == "1" ]] || {
     log "VS Code installation is disabled."
@@ -1198,99 +1130,6 @@ install_arch_update() {
   fi
 }
 
-download_as_user() {
-  local url="$1"
-  local dest="$2"
-
-  run_as_user mkdir -p "$(dirname "$dest")"
-  run_as_user curl -fL "$url" -o "$dest"
-}
-
-fix_polaris_desktop_icon() {
-  [[ "$FIX_POLARIS_DESKTOP_ICON" == "1" ]] || {
-    log "Polaris desktop icon fix is disabled."
-    return 0
-  }
-
-  if ! run_sudo test -f "$POLARIS_DESKTOP_FILE"; then
-    warn "$POLARIS_DESKTOP_FILE not found; cannot fix the Polaris desktop icon."
-    return 0
-  fi
-
-  if run_sudo grep -qE '^Icon=.+$' "$POLARIS_DESKTOP_FILE"; then
-    log "Polaris desktop entry already has an Icon= set; leaving it alone."
-  else
-    backup_system_path "$POLARIS_DESKTOP_FILE"
-    local tmp; tmp="$(mktemp)"
-    run_sudo sed -E "s/^Icon=.*\$/Icon=$POLARIS_DESKTOP_ICON_NAME/" "$POLARIS_DESKTOP_FILE" >"$tmp"
-    if ! grep -qE "^Icon=$POLARIS_DESKTOP_ICON_NAME\$" "$tmp"; then
-      warn "Could not locate an Icon= line in $POLARIS_DESKTOP_FILE to fix."
-      rm -f "$tmp"
-      return 0
-    fi
-    run_sudo install -m 0644 "$tmp" "$POLARIS_DESKTOP_FILE"
-    rm -f "$tmp"
-    log "Set Icon=$POLARIS_DESKTOP_ICON_NAME in $POLARIS_DESKTOP_FILE (upstream ships it empty)."
-    record_change "Fixed the missing icon in Polaris's desktop entry ($POLARIS_DESKTOP_FILE)."
-  fi
-
-  # pacman's gtk-update-icon-cache hook only fires when a whole icon-theme
-  # directory is added or removed (Target = usr/share/icons/*/), not when a
-  # package merely drops new files into the already-existing hicolor tree —
-  # so polaris.svg can sit there unindexed, showing as a broken icon in
-  # launchers/bars until the cache is rebuilt by hand.
-  if have_command gtk-update-icon-cache; then
-    run_sudo gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || \
-      warn "Could not refresh the hicolor icon cache."
-  fi
-  if have_command update-desktop-database; then
-    run_sudo update-desktop-database -q /usr/share/applications || \
-      warn "Could not refresh the desktop file database."
-  fi
-}
-
-install_polaris() {
-  [[ "$INSTALL_POLARIS" == "1" ]] || {
-    log "Polaris installation is disabled."
-    return 0
-  }
-
-  local pkg_url="$POLARIS_BASE_URL/Polaris-arch-x86_64.pkg.tar.zst"
-  local pkg_path="$TARGET_HOME/.cache/arch-niri-setup/downloads/$(basename "$pkg_url")"
-
-  log "Downloading Polaris package for Arch Linux."
-  if ! download_as_user "$pkg_url" "$pkg_path"; then
-    warn "Could not download Polaris package from $pkg_url."
-    return 0
-  fi
-
-  if ! pacman_install_local "$pkg_path"; then
-    warn "Could not install Polaris package."
-    return 0
-  fi
-
-  fix_polaris_desktop_icon
-
-  if [[ "$SETUP_POLARIS_HOST" == "1" ]]; then
-    if have_command polaris; then
-      log "Running Polaris host setup."
-      if run_sudo polaris --setup-host; then
-        record_change "Installed Polaris and ran host setup."
-      else
-        warn "Polaris installed, but host setup failed."
-        record_change "Installed Polaris."
-      fi
-    else
-      warn "Polaris package installed, but polaris was not found in PATH."
-      record_change "Installed Polaris package."
-    fi
-  else
-    record_change "Installed Polaris package."
-  fi
-
-  configure_polaris_autostart
-}
-
 install_default_apps() {
   install_vscode
   install_steam
@@ -1298,7 +1137,6 @@ install_default_apps() {
   install_nautilus_open_any_terminal
   install_lact
   install_arch_update
-  install_polaris
   install_proton_mail
   install_localsend
   install_protonup_qt
@@ -1336,7 +1174,6 @@ verify_config_source() {
   local missing=()
   [[ -d "$CONFIG_SOURCE_DIR/alacritty" ]] || missing+=("alacritty/")
   [[ -d "$CONFIG_SOURCE_DIR/niri" ]] || missing+=("niri/")
-  [[ -d "$CONFIG_SOURCE_DIR/polaris" ]] || missing+=("polaris/")
   [[ -f "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" ]] || missing+=("noctalia/$NOCTALIA_CONFIG_FILE")
   [[ -d "$CONFIG_SOURCE_DIR/wallpapers" ]] || missing+=("wallpapers/")
 
@@ -1344,17 +1181,13 @@ verify_config_source() {
     die "Config source $CONFIG_SOURCE_DIR is missing required content: ${missing[*]}"
   fi
 
-  log "Verified config source contains alacritty/, niri/, polaris/, noctalia/$NOCTALIA_CONFIG_FILE, and wallpapers/."
+  log "Verified config source contains alacritty/, niri/, noctalia/$NOCTALIA_CONFIG_FILE, and wallpapers/."
 }
 
 install_user_configs() {
   log "Installing repo configs and overwriting existing target config directories."
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/alacritty" "$TARGET_HOME/.config/alacritty"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/niri" "$TARGET_HOME/.config/niri"
-  # Not a replace: ~/.config/polaris also holds Polaris's own runtime state
-  # (logs, device/app caches, polaris_state.json) alongside polaris.conf —
-  # wiping the directory would destroy that state.
-  merge_user_path_into_dir "$CONFIG_SOURCE_DIR/polaris" "$TARGET_HOME/.config/polaris"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/noctalia" "$TARGET_HOME/$NOCTALIA_CONFIG_RELATIVE_DIR"
 }
 

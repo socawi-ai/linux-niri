@@ -42,10 +42,6 @@ INSTALL_MCMOJAVE_CURSORS="${INSTALL_MCMOJAVE_CURSORS:-1}"
 INSTALL_NAUTILUS_OPEN_ANY_TERMINAL="${INSTALL_NAUTILUS_OPEN_ANY_TERMINAL:-1}"
 INSTALL_LACT="${INSTALL_LACT:-1}"
 ENABLE_LACT_SERVICE="${ENABLE_LACT_SERVICE:-1}"
-INSTALL_POLARIS="${INSTALL_POLARIS:-1}"
-SETUP_POLARIS_HOST="${SETUP_POLARIS_HOST:-1}"
-ENABLE_POLARIS_AUTOSTART="${ENABLE_POLARIS_AUTOSTART:-1}"
-ENABLE_POLARIS_LINGER="${ENABLE_POLARIS_LINGER:-1}"
 CONFIGURE_PLYMOUTH="${CONFIGURE_PLYMOUTH:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 NOCTALIA_COPR="${NOCTALIA_COPR:-lionheartp/Hyprland}"
@@ -58,7 +54,6 @@ LACT_PACKAGE="${LACT_PACKAGE:-lact}"
 MCMOJAVE_CURSORS_REPO="${MCMOJAVE_CURSORS_REPO:-https://github.com/vinceliuice/McMojave-cursors}"
 MCMOJAVE_CURSORS_DIR="${MCMOJAVE_CURSORS_DIR:-$HOME/.cache/fedora-niri-setup/McMojave-cursors}"
 MCMOJAVE_CURSOR_THEME="${MCMOJAVE_CURSOR_THEME:-McMojave-cursors}"
-POLARIS_BASE_URL="${POLARIS_BASE_URL:-https://github.com/papi-ux/polaris/releases/latest/download}"
 GRUB_GFXMODE="${GRUB_GFXMODE:-3440x1440,2560x1440,1920x1080,auto}"
 GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
 GRUB_CONFIG_FILE="${GRUB_CONFIG_FILE:-/etc/default/grub}"
@@ -355,33 +350,6 @@ extract_archive_into_user_dir() {
   run_as_user mkdir -p "$dest"
   run_as_user tar -xf "$archive" -C "$dest"
   record_change "Extracted $(basename "$archive") into $dest."
-}
-
-merge_user_path_into_dir() {
-  # Like replace_user_path_with_dir, but overlays files from $src into $dest
-  # instead of wiping $dest first. Use this for directories that mix
-  # declarative config with an app's own runtime state (logs, caches,
-  # databases, lock files) — a wholesale rm -rf would destroy that state.
-  local src="$1"
-  local dest="$2"
-  [[ -d "$src" ]] || die "Expected directory $src."
-
-  case "$dest" in
-    "$TARGET_HOME"/*) ;;
-    *) die "Refusing to write path outside target home: $dest" ;;
-  esac
-
-  run_as_user mkdir -p "$dest"
-
-  local f rel
-  while IFS= read -r -d '' f; do
-    rel="${f#"$src"/}"
-    backup_user_path "$dest/$rel"
-    run_as_user mkdir -p "$(dirname "$dest/$rel")"
-    run_as_user cp -a "$f" "$dest/$rel"
-  done < <(find "$src" -type f -print0)
-
-  record_change "Merged $(basename "$dest") config into $dest (existing files preserved)."
 }
 
 safe_rm_rf() {
@@ -767,21 +735,6 @@ set_systemd_user_service() {
   return 1
 }
 
-configure_polaris_autostart() {
-  [[ "$ENABLE_POLARIS_AUTOSTART" == "1" ]] || {
-    log "Polaris autostart is disabled."
-    return 0
-  }
-
-  if [[ "$ENABLE_POLARIS_LINGER" == "1" ]]; then
-    run_sudo loginctl enable-linger "$TARGET_USER" || warn "Could not enable linger for $TARGET_USER."
-  fi
-
-  if set_systemd_user_service polaris.service; then
-    record_change "Enabled Polaris user service autostart."
-  fi
-}
-
 upsert_grub_default() {
   local key="$1"
   local value="$2"
@@ -1016,65 +969,12 @@ install_lact() {
   fi
 }
 
-download_as_user() {
-  local url="$1"
-  local dest="$2"
-
-  run_as_user mkdir -p "$(dirname "$dest")"
-  run_as_user curl -fL "$url" -o "$dest"
-}
-
-install_polaris() {
-  [[ "$INSTALL_POLARIS" == "1" ]] || {
-    log "Polaris installation is disabled."
-    return 0
-  }
-
-  local fedora_version
-  local rpm_url
-  local rpm_path
-  fedora_version="$(rpm -E %fedora)"
-  rpm_url="$POLARIS_BASE_URL/Polaris-fedora${fedora_version}-x86_64.rpm"
-  rpm_path="$TARGET_HOME/.cache/fedora-niri-setup/downloads/$(basename "$rpm_url")"
-
-  log "Downloading Polaris package for Fedora $fedora_version."
-  if ! download_as_user "$rpm_url" "$rpm_path"; then
-    warn "Could not download Polaris package from $rpm_url."
-    return 0
-  fi
-
-  if ! dnf_install_optional "$rpm_path"; then
-    warn "Could not install Polaris package."
-    return 0
-  fi
-
-  if [[ "$SETUP_POLARIS_HOST" == "1" ]]; then
-    if have_command polaris; then
-      log "Running Polaris host setup."
-      if run_sudo polaris --setup-host; then
-        record_change "Installed Polaris and ran host setup."
-      else
-        warn "Polaris installed, but host setup failed."
-        record_change "Installed Polaris."
-      fi
-    else
-      warn "Polaris package installed, but polaris was not found in PATH."
-      record_change "Installed Polaris package."
-    fi
-  else
-    record_change "Installed Polaris package."
-  fi
-
-  configure_polaris_autostart
-}
-
 install_default_apps() {
   install_vscode
   install_steam
   install_mcmojave_cursors
   install_nautilus_open_any_terminal
   install_lact
-  install_polaris
   install_proton_mail
   install_localsend
   install_protonup_qt
@@ -1124,7 +1024,6 @@ verify_config_source() {
   local missing=()
   [[ -d "$CONFIG_SOURCE_DIR/alacritty" ]] || missing+=("alacritty/")
   [[ -d "$CONFIG_SOURCE_DIR/niri" ]] || missing+=("niri/")
-  [[ -d "$CONFIG_SOURCE_DIR/polaris" ]] || missing+=("polaris/")
   [[ -f "$CONFIG_SOURCE_DIR/noctalia/$NOCTALIA_CONFIG_FILE" ]] || missing+=("noctalia/$NOCTALIA_CONFIG_FILE")
   [[ -d "$CONFIG_SOURCE_DIR/wallpapers" ]] || missing+=("wallpapers/")
 
@@ -1132,17 +1031,13 @@ verify_config_source() {
     die "Config source $CONFIG_SOURCE_DIR is missing required content: ${missing[*]}"
   fi
 
-  log "Verified config source contains alacritty/, niri/, polaris/, noctalia/$NOCTALIA_CONFIG_FILE, and wallpapers/."
+  log "Verified config source contains alacritty/, niri/, noctalia/$NOCTALIA_CONFIG_FILE, and wallpapers/."
 }
 
 install_user_configs() {
   log "Installing repo configs and overwriting existing target config directories."
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/alacritty" "$TARGET_HOME/.config/alacritty"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/niri" "$TARGET_HOME/.config/niri"
-  # Not a replace: ~/.config/polaris also holds Polaris's own runtime state
-  # (logs, device/app caches, polaris_state.json) alongside polaris.conf —
-  # wiping the directory would destroy that state.
-  merge_user_path_into_dir "$CONFIG_SOURCE_DIR/polaris" "$TARGET_HOME/.config/polaris"
   replace_user_path_with_dir "$CONFIG_SOURCE_DIR/noctalia" "$TARGET_HOME/$NOCTALIA_CONFIG_RELATIVE_DIR"
 }
 
