@@ -60,11 +60,34 @@ REFIND_USE_LOCALKEYS="${REFIND_USE_LOCALKEYS:-1}"
 
 REFIND_MENUENTRY_LABEL="${REFIND_MENUENTRY_LABEL:-Fedora}"
 REFIND_MENUENTRY_ICON="${REFIND_MENUENTRY_ICON:-themes/$REFIND_THEME_NAME/icons/os_fedora.png}"
-# Excludes "internal" so rEFInd's own ESP filesystem scan can't also surface
-# an auto-detected duplicate of the entry defined manually below; keeps
+# Includes "internal" so rEFInd's own ESP/internal-disk filesystem scan can
+# auto-detect other OSes already installed alongside Fedora (e.g. a Windows
+# Boot Manager on the same or another internal disk). This would normally
+# also surface a duplicate, auto-detected "Fedora" entry for the same
+# shim/grub chain the manual menuentry below already covers -- see
+# REFIND_DONT_SCAN_DIRS just below for how that specific duplicate is
+# suppressed without losing internal scanning generally. Keeps
 # "external,optical" so a USB installer/rescue disk still shows up if one is
 # plugged in.
-REFIND_SCANFOR="${REFIND_SCANFOR:-manual,external,optical}"
+REFIND_SCANFOR="${REFIND_SCANFOR:-manual,internal,external,optical}"
+# Directories (relative to each scanned volume's root) that rEFInd's
+# internal scan should skip. Excludes Fedora's own EFI directory so
+# scanning "internal" above doesn't also auto-detect a second "Fedora" entry
+# duplicating the manual one, and excludes EFI/BOOT so the generic
+# removable-media "Fallback bootloader" (EFI/BOOT/BOOTX64.EFI, which Fedora
+# also installs on the ESP) doesn't show up as its own entry either --
+# neither exclusion affects Windows or any other OS elsewhere on the disk.
+# Set to "" to scan everything (you'll then likely see both duplicates back).
+REFIND_DONT_SCAN_DIRS="${REFIND_DONT_SCAN_DIRS:-EFI/fedora,EFI/BOOT}"
+# rEFInd's internal scan doesn't just look for boot loaders -- with this on
+# (rEFInd's own default) it also reads every internal filesystem it can
+# (including Fedora's separate /boot ext4 partition) for individual
+# EFI-stub-capable Linux kernel files (vmlinuz-*) and adds a boot stanza per
+# kernel found. That's redundant here: the manual Fedora menuentry above
+# already chainloads shim -> grub -> BLS, which already picks the right
+# kernel itself, so this is turned off to avoid one extra "Boot vmlinuz-..."
+# entry per installed kernel.
+REFIND_SCAN_ALL_LINUX_KERNELS="${REFIND_SCAN_ALL_LINUX_KERNELS:-false}"
 REFIND_TIMEOUT_SECONDS="${REFIND_TIMEOUT_SECONDS:-10}"
 # Without an explicit resolution, rEFInd auto-picks a GOP mode that often
 # doesn't match the real display, so the theme's fillscreen banner and icons
@@ -608,10 +631,19 @@ configure_refind_boot_entry() {
     resolution_line="resolution $REFIND_RESOLUTION_WIDTH $REFIND_RESOLUTION_HEIGHT"
   fi
 
+  local dont_scan_line=""
+  if [[ -n "$REFIND_DONT_SCAN_DIRS" ]]; then
+    dont_scan_line="dont_scan_dirs $REFIND_DONT_SCAN_DIRS"
+  fi
+
+  local scan_kernels_line="scan_all_linux_kernels $REFIND_SCAN_ALL_LINUX_KERNELS"
+
   cat >>"$tmp" <<EOF
 $marker_begin
 timeout $REFIND_TIMEOUT_SECONDS
 scanfor $REFIND_SCANFOR
+$dont_scan_line
+$scan_kernels_line
 $resolution_line
 
 menuentry "$REFIND_MENUENTRY_LABEL" {
@@ -626,7 +658,7 @@ EOF
   run_sudo install -m 0644 "$tmp" "$refind_conf"
   rm -f "$tmp"
 
-  log "Configured a single '$REFIND_MENUENTRY_LABEL' entry in $refind_conf (chainloads $REFIND_SHIM_LOADER_PATH), timeout ${REFIND_TIMEOUT_SECONDS}s, auto-scan restricted to: $REFIND_SCANFOR, resolution: ${REFIND_RESOLUTION_WIDTH:-auto}${REFIND_RESOLUTION_WIDTH:+x}${REFIND_RESOLUTION_HEIGHT}."
+  log "Configured a single '$REFIND_MENUENTRY_LABEL' entry in $refind_conf (chainloads $REFIND_SHIM_LOADER_PATH), timeout ${REFIND_TIMEOUT_SECONDS}s, auto-scan: $REFIND_SCANFOR (excluding: ${REFIND_DONT_SCAN_DIRS:-none}), scan_all_linux_kernels: $REFIND_SCAN_ALL_LINUX_KERNELS, resolution: ${REFIND_RESOLUTION_WIDTH:-auto}${REFIND_RESOLUTION_WIDTH:+x}${REFIND_RESOLUTION_HEIGHT}."
   record_change "Configured rEFInd's boot menu entry and timeout in $refind_conf."
 }
 
