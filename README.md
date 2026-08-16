@@ -54,8 +54,14 @@ chmod +x fedora-refind-setup.sh
 
 `arch-niri-setup.sh` installs the same desktop, adapted to pacman/AUR. It
 assumes the bootloader is already installed and preconfigured (e.g. via
-`archinstall`) and never touches it — except rEFInd, which it themes if
-present (skipped gracefully otherwise).
+`archinstall`) and never touches it, **except rEFInd, which it requires**:
+the script checks for an existing `refind.conf` right at the start and
+refuses to run if it can't find one (set `INSTALL_REFIND_THEME=0` to run
+without rEFInd at all). It only ever themes an existing rEFInd install —
+never installs rEFInd itself or touches its existing menu entries/scan
+config, beyond adding the theme and setting an explicit `resolution` (fixes
+distorted banner/icons under the theme; set
+`REFIND_RESOLUTION_WIDTH`/`HEIGHT=""` to leave your existing setting alone).
 
 - Niri, greetd, Alacritty, Nautilus, Fish, Firefox, PipeWire, pavucontrol,
   desktop portals, GTK/Qt Wayland support — official repos
@@ -65,8 +71,8 @@ present (skipped gracefully otherwise).
 - Noctalia v5 + Greeter (stable, AUR), McMojave cursors (AUR), Nautilus Open
   Any Terminal (AUR), LACT (official repo), VS Code (AUR)
 - Steam (via `multilib`)
-- [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) theme, if rEFInd is
-  detected — plus a hardware-watchdog module blacklist to silence a common
+- [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) theme (required, see
+  above) — plus a hardware-watchdog module blacklist to silence a common
   "watchdog did not stop" shutdown warning
 
 An AUR helper (`paru` by default, `yay` supported) is bootstrapped

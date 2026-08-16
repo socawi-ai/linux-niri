@@ -54,10 +54,12 @@ INSTALL_ARCH_UPDATE="${INSTALL_ARCH_UPDATE:-1}"
 ENABLE_ARCH_UPDATE_TIMER="${ENABLE_ARCH_UPDATE_TIMER:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 
-# rEFInd theme — this script never installs or configures rEFInd itself
-# (it's assumed already set up, e.g. via archinstall), only applies a visual
-# theme on top of an existing installation. Skipped gracefully if refind.conf
-# can't be found.
+# rEFInd theme — this script assumes rEFInd is already installed and
+# configured (e.g. via archinstall) and refuses to run (see require_refind())
+# unless it can find refind.conf; it never installs rEFInd itself or touches
+# its existing menu entries/scan config, only layers a visual theme on top.
+# Set INSTALL_REFIND_THEME=0 to skip rEFInd entirely (no preflight check, no
+# theming) if this machine doesn't use rEFInd at all.
 INSTALL_REFIND_THEME="${INSTALL_REFIND_THEME:-1}"
 REFIND_THEME_REPO="${REFIND_THEME_REPO:-https://github.com/NilsPvR/rEFInd-nils}"
 REFIND_THEME_NAME="${REFIND_THEME_NAME:-rEFInd-nils}"
@@ -65,6 +67,13 @@ REFIND_THEME_DIR="${REFIND_THEME_DIR:-$HOME/.cache/arch-niri-setup/refind-theme}
 # Explicit override if find_refind_conf() can't locate refind.conf on its own
 # (unusual ESP mount point or layout).
 REFIND_CONF_PATH="${REFIND_CONF_PATH:-}"
+# Without an explicit resolution, rEFInd auto-picks a GOP mode that often
+# doesn't match the real display, so the theme's fullscreen banner and icons
+# render distorted/misplaced. Matches fedora-refind-setup.sh's default for
+# the same ultrawide display. Set to "" to leave whatever resolution setting
+# (or lack of one) is already in your refind.conf alone.
+REFIND_RESOLUTION_WIDTH="${REFIND_RESOLUTION_WIDTH:-3440}"
+REFIND_RESOLUTION_HEIGHT="${REFIND_RESOLUTION_HEIGHT:-1440}"
 # On a non-UKI setup, rEFInd's loose-kernel scan (vmlinuz found directly in
 # /boot rather than a bootloader-binary directory) only picks up a
 # distro-specific icon if this exact file is present — otherwise it falls
@@ -329,6 +338,23 @@ prepare_runtime() {
   log "System backups: $SYSTEM_BACKUP_ROOT"
 }
 
+# This script assumes rEFInd is already installed and configured (e.g. via
+# archinstall) -- checked here, up front, so a machine without rEFInd fails
+# fast instead of only finding out after installing every other package.
+# find_refind_conf() is defined further down (it also does the real theming
+# work later); forward-referencing it here is fine since main() doesn't call
+# this until after the whole script has been parsed.
+require_refind() {
+  [[ "$INSTALL_REFIND_THEME" == "1" ]] || {
+    log "rEFInd theming is disabled (INSTALL_REFIND_THEME=0); skipping the rEFInd requirement check."
+    return 0
+  }
+
+  log "Checking for an existing rEFInd installation (this script assumes rEFInd is already set up, e.g. via archinstall)."
+  find_refind_conf >/dev/null || die "This script assumes rEFInd is already installed and configured (e.g. via archinstall), but no refind.conf was found (searched /boot, /boot/efi, /efi, and any mounted vfat filesystem). Install and configure rEFInd first, set REFIND_CONF_PATH to its exact location if it's somewhere unusual, or set INSTALL_REFIND_THEME=0 to run this script without rEFInd."
+  log "Found an existing rEFInd installation."
+}
+
 already_backed_up() {
   local path="$1"
   shift
@@ -570,6 +596,7 @@ install_arch_packages() {
     firefox
     xwayland-satellite
     nautilus
+    gnome-software
     xdg-user-dirs
     xdg-utils
     file-roller
@@ -583,7 +610,6 @@ install_arch_packages() {
     xdg-desktop-portal-gtk
     dbus
     dconf
-    polkit
     libsecret
     avahi
     nss-mdns
@@ -745,6 +771,10 @@ install_protonup_qt() {
 }
 
 detect_gpu_vendors() {
+  # pciutils isn't in the base package list (most machines already have it),
+  # but install it best-effort here rather than silently giving up detection
+  # to a fallback whenever it's genuinely missing.
+  have_command lspci || pacman_install_best_effort pciutils
   have_command lspci || return 0
 
   local pci_out
@@ -953,12 +983,17 @@ install_refind_theme() {
     return 0
   }
 
+  # require_refind() should already have confirmed this exists during
+  # preflight; re-checking here rather than trusting that (in case
+  # something changed the ESP mid-run) is a hard failure, not a graceful
+  # skip, since by this point we've already told the user rEFInd is required.
   local refind_conf
   refind_conf="$(find_refind_conf || true)"
-  if [[ -z "$refind_conf" ]]; then
-    warn "Could not locate refind.conf (searched /boot, /boot/efi, /efi, and any mounted vfat filesystem). Set REFIND_CONF_PATH to its exact location if it's somewhere unusual, or set INSTALL_REFIND_THEME=0 if rEFInd isn't actually installed."
-    return 0
-  fi
+  [[ -n "$refind_conf" ]] || die "refind.conf could not be located anymore (it was found during preflight). Searched /boot, /boot/efi, /efi, and any mounted vfat filesystem."
+
+  # Independent of whether the theme itself installs below -- a resolution
+  # fix is a real improvement even if the theme repo fails to clone.
+  configure_refind_resolution "$refind_conf"
 
   log "Fetching rEFInd theme from $REFIND_THEME_REPO."
   clone_or_update_git_repo "$REFIND_THEME_REPO" "$REFIND_THEME_DIR"
@@ -1016,6 +1051,44 @@ install_refind_theme() {
 
   log "Added theme include to $refind_conf."
   record_change "Enabled rEFInd theme '$REFIND_THEME_NAME' in $refind_conf."
+}
+
+# Only touches rEFInd's resolution setting -- nothing else in refind.conf
+# (scanfor, dont_scan_dirs, timeout, existing menu entries) is managed by
+# this script, unlike fedora-refind-setup.sh's fuller boot-entry config,
+# since this script assumes an already-configured rEFInd it shouldn't
+# otherwise disturb.
+configure_refind_resolution() {
+  local refind_conf="$1"
+
+  [[ -n "$REFIND_RESOLUTION_WIDTH" && -n "$REFIND_RESOLUTION_HEIGHT" ]] || {
+    log "REFIND_RESOLUTION_WIDTH/HEIGHT not set; leaving rEFInd's resolution setting as-is."
+    return 0
+  }
+
+  local marker_begin="# BEGIN arch-niri-setup generated resolution"
+  local marker_end="# END arch-niri-setup generated resolution"
+
+  backup_system_path "$refind_conf"
+  local tmp; tmp="$(mktemp)"
+  run_sudo awk -v marker_begin="$marker_begin" -v marker_end="$marker_end" '
+    $0 == marker_begin { skipping = 1; next }
+    $0 == marker_end   { skipping = 0; next }
+    !skipping { print }
+  ' "$refind_conf" >"$tmp"
+
+  [[ -s "$tmp" ]] && printf '\n' >>"$tmp"
+  cat >>"$tmp" <<EOF
+$marker_begin
+resolution $REFIND_RESOLUTION_WIDTH $REFIND_RESOLUTION_HEIGHT
+$marker_end
+EOF
+
+  run_sudo install -m 0644 "$tmp" "$refind_conf"
+  rm -f "$tmp"
+
+  log "Set rEFInd resolution to ${REFIND_RESOLUTION_WIDTH}x${REFIND_RESOLUTION_HEIGHT} in $refind_conf."
+  record_change "Set rEFInd resolution to ${REFIND_RESOLUTION_WIDTH}x${REFIND_RESOLUTION_HEIGHT} in $refind_conf (without this, rEFInd auto-picks a GOP mode that often doesn't match the real display, distorting the theme's banner/icons)."
 }
 
 disable_hardware_watchdog() {
@@ -1574,6 +1647,7 @@ main() {
   require_arch
   resolve_target_user
   prepare_runtime
+  require_refind
 
   section "Base packages"
   install_arch_packages
