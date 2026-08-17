@@ -122,14 +122,6 @@ about `POLARIS_ENABLE_KMS=1` (re-run the script) or
 `sudo -H polaris --setup-host --enable-kms` manually — off by default since
 it's explicitly situational, not a universal requirement.
 
-Replaces this repo's former Sunshine-based setup (`install-sunshine-beta.sh`,
-`install-sunshine.sh`, and `steam-sunshine-sync.sh`, all removed) — Polaris
-scans your Steam library itself, so no external sync script is needed
-anymore. Note that the removed `steam-sunshine-sync.sh` also had a niri
-output-resolution-switching feature (via `prep-cmd`, for streaming to a
-different resolution/aspect ratio than your desktop, e.g. an ultrawide
-desktop + 16:9 TV); Polaris has no confirmed equivalent for that yet.
-
 ## Backups
 
 Each script backs up replaced files before touching them, and writes a
