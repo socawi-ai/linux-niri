@@ -91,73 +91,44 @@ chmod +x arch-niri-setup.sh
 
 Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./arch-niri-setup.sh`
 
-## Sunshine game streaming (optional)
+## Polaris game streaming (optional)
 
-Two standalone scripts add [Sunshine](https://app.lizardbyte.dev/Sunshine/)
-game streaming for your Steam library. Neither is called by the setup
-scripts above and neither requires them — both just assume Steam is
-already installed.
-
-`install-sunshine-beta.sh` installs Sunshine from each distro's **beta**
-channel (LizardByte's `lizardbyte/beta` COPR on Fedora, the `sunshine-git`
-AUR package on Arch — not the Flatpak build, since Flatpak's Sunshine
-sandbox doesn't support KMS screen capture) and enables it to start on
-login. On Arch it bootstraps an AUR helper itself (`paru` by default, set
-`AUR_HELPER=yay` to use that instead) if one isn't already installed:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/install-sunshine-beta.sh -o install-sunshine-beta.sh
-chmod +x install-sunshine-beta.sh
-./install-sunshine-beta.sh
-```
-
-Afterwards, open `https://localhost:47990` once in a browser to set
-Sunshine's admin username/password — this one-time step can't be scripted
-and Sunshine won't accept connections until it's done.
-
-`steam-sunshine-sync.sh` scans your installed Steam games (including
-libraries on other drives, and Flatpak Steam) and syncs a chosen subset
-into Sunshine's `apps.json` as `steam://rungameid/<appid>` launchers, with
-cover art pulled from Steam's CDN:
+`install-polaris.sh` installs [Polaris](https://github.com/papi-ux/polaris)
+(a self-hosted GameStream host for Nova and Moonlight-compatible clients)
+from the latest GitHub release, verifying each downloaded package against
+the sha256 digest GitHub publishes for it before installing. Not called by
+the setup scripts above and doesn't require them — just assumes Steam is
+already installed if you plan to stream it. Fedora gets the
+`Polaris-fedoraNN-x86_64.rpm` asset matching your Fedora version (falling
+back to whatever build is published, with a warning, if Polaris hasn't cut
+one for your exact release yet); Arch gets `Polaris-arch-x86_64.pkg.tar.zst`
+via `pacman -U`. Both run `sudo -H polaris --setup-host` and enable the
+`polaris` user service to start on login:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/steam-sunshine-sync.sh -o steam-sunshine-sync.sh
-chmod +x steam-sunshine-sync.sh
-./steam-sunshine-sync.sh
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/install-polaris.sh -o install-polaris.sh
+chmod +x install-polaris.sh
+./install-polaris.sh
 ```
 
-Both scripts detect the distro (Fedora or Arch) and install whatever they're
-missing (`jq`, `curl`, an image converter for cover art, `whiptail`) with
-the right package manager automatically — set `AUTO_INSTALL_DEPENDENCIES=0`
-to just get a suggested install command instead.
+Afterwards, open `https://localhost:47990` once in a browser to create the
+web account and pair a client (Nova or Moonlight) — this one-time step
+can't be scripted. Steam games don't need a separate sync script: add them
+from the web UI's Applications tab (built-in library scan, optional
+SteamGridDB cover art), or launch Steam Big Picture directly. If capture
+doesn't work out of the box, see
+[the Polaris configuration docs](https://papi-ux.com/docs/configuration/)
+about `POLARIS_ENABLE_KMS=1` (re-run the script) or
+`sudo -H polaris --setup-host --enable-kms` manually — off by default since
+it's explicitly situational, not a universal requirement.
 
-The first run (or any run with `--select`) opens a checklist (`whiptail`,
-falling back to `dialog`, or a plain numbered prompt if neither is
-available) pre-checked with your current selection, so you choose which
-games to sync — nothing is added unconditionally. Use `--list` to print the
-current selection without opening the picker. Re-run after installing new
-games to add them, or with `--select` to change your selection; it only
-ever touches the entries it created, so anything you added to Sunshine by
-hand is left alone. See `--help` for all options.
-
-### Streaming at a different resolution than your desktop
-
-If your desktop monitor and streaming target (e.g. a TV) have different
-resolutions/aspect ratios (ultrawide desktop, 16:9 TV), run
-`./steam-sunshine-sync.sh --settings` to open a settings dialog (same
-`whiptail`/`dialog`/plain-prompt picker as game selection) and turn on
-resolution switching. Once enabled, **every** synced game switches a given
-niri output to a streaming-friendly mode for the duration of the stream and
-restores it afterwards — via a `prep-cmd` calling
-`niri msg output <name> mode ...`, the same idea as Sunshine's own bundled
-"Low Res Desktop" `xrandr` example, adapted for niri. The dialog asks for
-the output's connector name (find it with `niri msg outputs`) and the two
-modes to switch between; it's persisted to
-`~/.config/steam-sunshine-sync/settings.conf` and applied automatically on
-every future run — no flag needed after that first `--settings` run.
-`NIRI_RESOLUTION_SWITCH`/`NIRI_OUTPUT_NAME`/`NIRI_STREAM_MODE`/`NIRI_NATIVE_MODE`
-env vars are also available for scripting and always override whatever's
-in the settings file.
+Replaces this repo's former Sunshine-based setup (`install-sunshine-beta.sh`,
+`install-sunshine.sh`, and `steam-sunshine-sync.sh`, all removed) — Polaris
+scans your Steam library itself, so no external sync script is needed
+anymore. Note that the removed `steam-sunshine-sync.sh` also had a niri
+output-resolution-switching feature (via `prep-cmd`, for streaming to a
+different resolution/aspect ratio than your desktop, e.g. an ultrawide
+desktop + 16:9 TV); Polaris has no confirmed equivalent for that yet.
 
 ## Backups
 
