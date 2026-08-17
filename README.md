@@ -91,6 +91,32 @@ chmod +x arch-niri-setup.sh
 
 Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./arch-niri-setup.sh`
 
+## archinstall profile (optional)
+
+`archinstall/user_configuration.json` reproduces this machine's base-system
+choices in [archinstall](https://github.com/archlinux/archinstall) (v4.4+):
+disk layout (btrfs on a single NVMe drive, `@`/`@home`/`@log`/`@pkg`
+subvolumes, zstd compression), rEFInd as the bootloader (archinstall installs
+and configures it directly — no UKI, Plymouth's `spinner` theme), zram swap,
+Swedish locale/timezone, and NetworkManager. It does **not** cover the
+desktop — that's still `arch-niri-setup.sh` above, run after first boot.
+
+**This wipes `/dev/nvme0n1`.** Check `lsblk` on the target machine first and
+edit `disk_config.device_modifications[0].device` in the JSON if the disk
+differs from this one.
+
+On the Arch ISO:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/archinstall/user_configuration.json -o user_configuration.json
+archinstall --config user_configuration.json
+```
+
+Deliberately not `--silent`, and no credentials file: every guided screen is
+pre-filled from the config but still shown for review before anything is
+written, and you type the username/password directly when archinstall asks
+for them — nothing sensitive ever needs to live in this repo.
+
 ## Polaris game streaming (optional)
 
 `install-polaris.sh` installs [Polaris](https://github.com/papi-ux/polaris)
