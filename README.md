@@ -102,7 +102,8 @@ already installed.
 channel (LizardByte's `lizardbyte/beta` COPR on Fedora, the `sunshine-git`
 AUR package on Arch — not the Flatpak build, since Flatpak's Sunshine
 sandbox doesn't support KMS screen capture) and enables it to start on
-login:
+login. On Arch it bootstraps an AUR helper itself (`paru` by default, set
+`AUR_HELPER=yay` to use that instead) if one isn't already installed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/install-sunshine-beta.sh -o install-sunshine-beta.sh
@@ -125,9 +126,14 @@ chmod +x steam-sunshine-sync.sh
 ./steam-sunshine-sync.sh
 ```
 
+Both scripts detect the distro (Fedora or Arch) and install whatever they're
+missing (`jq`, `curl`, an image converter for cover art, `whiptail`) with
+the right package manager automatically — set `AUTO_INSTALL_DEPENDENCIES=0`
+to just get a suggested install command instead.
+
 The first run (or any run with `--select`) opens a checklist (`whiptail`,
 falling back to `dialog`, or a plain numbered prompt if neither is
-installed) pre-checked with your current selection, so you choose which
+available) pre-checked with your current selection, so you choose which
 games to sync — nothing is added unconditionally. Use `--list` to print the
 current selection without opening the picker. Re-run after installing new
 games to add them, or with `--select` to change your selection; it only

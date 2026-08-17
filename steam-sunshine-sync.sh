@@ -17,6 +17,9 @@ set -Eeuo pipefail
 # selection + currently-installed games, so an uninstalled game silently
 # drops out on the next sync with no separate cleanup step needed.
 
+AUTO_INSTALL_DEPENDENCIES="${AUTO_INSTALL_DEPENDENCIES:-1}"
+ASSUME_YES="${ASSUME_YES:-1}"
+
 SUNSHINE_CONFIG_DIR="${SUNSHINE_CONFIG_DIR:-$HOME/.config/sunshine}"
 SUNSHINE_APPS_JSON="${SUNSHINE_APPS_JSON:-$SUNSHINE_CONFIG_DIR/apps.json}"
 SUNSHINE_COVERS_DIR="${SUNSHINE_COVERS_DIR:-$SUNSHINE_CONFIG_DIR/covers}"
@@ -184,29 +187,94 @@ parse_args() {
   done
 }
 
+detect_distro() {
+  [[ -f /etc/os-release ]] || { printf 'unknown'; return 0; }
+  local id id_like
+  id="$(grep -oP '^ID=\K.*' /etc/os-release 2>/dev/null | tr -d '"')"
+  id_like="$(grep -oP '^ID_LIKE=\K.*' /etc/os-release 2>/dev/null | tr -d '"')"
+  case "$id $id_like" in
+    *fedora*) printf 'fedora' ;;
+    *arch*) printf 'arch' ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+DISTRO="$(detect_distro)"
+
 suggest_install_cmd() {
   local pkgs="$1"
-  local id="" id_like=""
-  if [[ -f /etc/os-release ]]; then
-    id="$(grep -oP '^ID=\K.*' /etc/os-release 2>/dev/null | tr -d '"')"
-    id_like="$(grep -oP '^ID_LIKE=\K.*' /etc/os-release 2>/dev/null | tr -d '"')"
-  fi
-  case "$id $id_like" in
-    *fedora*) printf 'sudo dnf install %s' "$pkgs" ;;
-    *arch*) printf 'sudo pacman -S %s' "$pkgs" ;;
+  case "$DISTRO" in
+    fedora) printf 'sudo dnf install %s' "$pkgs" ;;
+    arch) printf 'sudo pacman -S %s' "$pkgs" ;;
     *) printf 'install: %s' "$pkgs" ;;
   esac
 }
 
+# Maps a generic dependency name to the package that provides it on the
+# detected distro -- names diverge between Fedora and Arch for a couple of
+# these (ImageMagick/whiptail), so this can't just reuse the command name.
+package_name_for() {
+  local tool="$1"
+  case "$tool" in
+    imagemagick) [[ "$DISTRO" == "fedora" ]] && printf 'ImageMagick' || printf 'imagemagick' ;;
+    whiptail) [[ "$DISTRO" == "fedora" ]] && printf 'newt' || printf 'libnewt' ;;
+    *) printf '%s' "$tool" ;;
+  esac
+}
+
+install_packages() {
+  local -a pkgs=("$@")
+  ((${#pkgs[@]})) || return 0
+
+  case "$DISTRO" in
+    fedora)
+      have_command dnf || { warn "dnf was not found; cannot auto-install: ${pkgs[*]}."; return 1; }
+      sudo dnf install -y "${pkgs[@]}" || { warn "Could not install: ${pkgs[*]}."; return 1; }
+      ;;
+    arch)
+      have_command pacman || { warn "pacman was not found; cannot auto-install: ${pkgs[*]}."; return 1; }
+      local args=(-S --needed)
+      [[ "$ASSUME_YES" == "1" ]] && args+=(--noconfirm)
+      sudo pacman "${args[@]}" "${pkgs[@]}" || { warn "Could not install: ${pkgs[*]}."; return 1; }
+      ;;
+    *)
+      warn "Unrecognized distro; cannot auto-install: ${pkgs[*]}. Install manually."
+      return 1
+      ;;
+  esac
+
+  record_change "Installed: ${pkgs[*]}."
+  return 0
+}
+
+# Installs the package providing $cmd if it's missing and auto-install is
+# enabled. Returns success iff $cmd is available by the time it returns
+# (whether it already was, or installing it worked).
+ensure_command() {
+  local cmd="$1" pkgkey="${2:-$1}"
+  have_command "$cmd" && return 0
+  [[ "$AUTO_INSTALL_DEPENDENCIES" == "1" ]] || return 1
+
+  log "Installing missing dependency: $cmd."
+  install_packages "$(package_name_for "$pkgkey")"
+  have_command "$cmd"
+}
+
 check_dependencies() {
-  local -a missing=()
-  have_command jq || missing+=(jq)
-  have_command curl || missing+=(curl)
-  ((${#missing[@]} == 0)) || die "Missing required command(s): ${missing[*]}. Install with: $(suggest_install_cmd "${missing[*]}")"
+  local -a still_missing=()
+  ensure_command jq || still_missing+=(jq)
+  ensure_command curl || still_missing+=(curl)
+  ((${#still_missing[@]} == 0)) || die "Missing required command(s): ${still_missing[*]}. Install with: $(suggest_install_cmd "${still_missing[*]}")"
 
   if [[ "$FETCH_COVER_ART" == "1" ]] && ! have_command magick && ! have_command convert && ! have_command ffmpeg; then
-    warn "No image converter found (ImageMagick's magick/convert, or ffmpeg). Sunshine requires PNG box art, but Steam's CDN only serves JPG, so cover art will be skipped. Install with: $(suggest_install_cmd "ImageMagick")"
-    FETCH_COVER_ART=0
+    if [[ "$AUTO_INSTALL_DEPENDENCIES" == "1" ]]; then
+      log "Installing missing dependency: ImageMagick (Sunshine needs PNG cover art, Steam's CDN only serves JPG)."
+      install_packages "$(package_name_for imagemagick)"
+    fi
+    if ! have_command magick && ! have_command convert && ! have_command ffmpeg; then
+      warn "No image converter available (ImageMagick's magick/convert, or ffmpeg). Cover art will be skipped. Install with: $(suggest_install_cmd "$(package_name_for imagemagick)")"
+      FETCH_COVER_ART=0
+    fi
   fi
 
   if [[ "$NIRI_RESOLUTION_SWITCH" == "1" ]]; then
@@ -333,8 +401,15 @@ save_settings() {
 dialog_tool() {
   if have_command whiptail; then
     printf 'whiptail'
-  elif have_command dialog; then
+    return 0
+  fi
+  if have_command dialog; then
     printf 'dialog'
+    return 0
+  fi
+  if ensure_command whiptail; then
+    printf 'whiptail'
+    return 0
   fi
 }
 
@@ -347,7 +422,7 @@ run_picker() {
   tool="$(dialog_tool)"
 
   if [[ -z "$tool" ]]; then
-    warn "Neither whiptail nor dialog is installed; falling back to a plain numbered picker. Install one with: $(suggest_install_cmd "newt")"
+    warn "Neither whiptail nor dialog is installed; falling back to a plain numbered picker. Install one with: $(suggest_install_cmd "$(package_name_for whiptail)")"
     run_picker_plain "${appids[@]}"
     return 0
   fi
@@ -459,7 +534,7 @@ run_settings_menu() {
   tool="$(dialog_tool)"
 
   if [[ -z "$tool" ]]; then
-    warn "Neither whiptail nor dialog is installed; falling back to a plain settings prompt. Install one with: $(suggest_install_cmd "newt")"
+    warn "Neither whiptail nor dialog is installed; falling back to a plain settings prompt. Install one with: $(suggest_install_cmd "$(package_name_for whiptail)")"
     run_settings_menu_plain
     return 0
   fi

@@ -12,8 +12,9 @@ set -Eeuo pipefail
 # Sunshine sandbox does not support KMS screen capture, which this repo's
 # bare-Wayland/niri sessions need for streaming to actually work.
 #   Fedora: LizardByte's own COPR, beta channel.
-#   Arch:   the AUR's nightly/beta package (sunshine-git), via an existing
-#           AUR helper (paru/yay) -- this script does not bootstrap one.
+#   Arch:   the AUR's nightly/beta package (sunshine-git), via an AUR helper
+#           (paru by default, set AUR_HELPER=yay to use that instead) --
+#           bootstrapped from the AUR itself if not already installed.
 
 SUNSHINE_COPR="${SUNSHINE_COPR:-lizardbyte/beta}"
 SUNSHINE_AUR_PACKAGE="${SUNSHINE_AUR_PACKAGE:-sunshine-git}"
@@ -88,8 +89,28 @@ install_sunshine_fedora() {
   record_change "Installed Sunshine from COPR $SUNSHINE_COPR."
 }
 
+ensure_aur_helper() {
+  have_command "$AUR_HELPER" && return 0
+
+  log "$AUR_HELPER was not found; bootstrapping it from the AUR."
+  have_command sudo || die "sudo was not found; cannot bootstrap $AUR_HELPER."
+  have_command pacman || die "pacman was not found; cannot bootstrap $AUR_HELPER."
+  have_command git || sudo pacman -S --needed --noconfirm git || die "Could not install git (required to bootstrap $AUR_HELPER)."
+  sudo pacman -S --needed --noconfirm base-devel || die "Could not install base-devel (required to build $AUR_HELPER)."
+
+  local build_dir
+  build_dir="$(mktemp -d)"
+  git clone "https://aur.archlinux.org/${AUR_HELPER}.git" "$build_dir" || die "Could not clone $AUR_HELPER from the AUR."
+
+  (cd "$build_dir" && makepkg -si --noconfirm --needed) || die "Could not build/install $AUR_HELPER. Check the output above."
+  rm -rf "$build_dir"
+
+  have_command "$AUR_HELPER" || die "$AUR_HELPER installation finished, but it was not found in PATH."
+  record_change "Bootstrapped the $AUR_HELPER AUR helper."
+}
+
 install_sunshine_arch() {
-  have_command "$AUR_HELPER" || die "$AUR_HELPER was not found. Install an AUR helper (paru or yay) first, or set AUR_HELPER to the one you use."
+  ensure_aur_helper
 
   log "Installing $SUNSHINE_AUR_PACKAGE from the AUR via $AUR_HELPER (source build -- this can take a while)."
   local args=(-S --needed)
