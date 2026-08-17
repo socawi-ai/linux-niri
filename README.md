@@ -105,17 +105,29 @@ desktop — that's still `arch-niri-setup.sh` above, run after first boot.
 edit `disk_config.device_modifications[0].device` in the JSON if the disk
 differs from this one.
 
-On the Arch ISO:
+On the Arch ISO (`git` is preinstalled there):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/archinstall/user_configuration.json -o user_configuration.json
-archinstall --config user_configuration.json
+git clone https://github.com/socawi-ai/linux-niri.git
+cd linux-niri
+lsblk                                          # confirm the disk target above
+archinstall --config archinstall/user_configuration.json
 ```
 
 Deliberately not `--silent`, and no credentials file: every guided screen is
 pre-filled from the config but still shown for review before anything is
 written, and you type the username/password directly when archinstall asks
 for them — nothing sensitive ever needs to live in this repo.
+
+The live ISO's filesystem doesn't survive the reboot into the new install, so
+clone the repo again afterwards to run `arch-niri-setup.sh` for the desktop
+layer:
+
+```bash
+git clone https://github.com/socawi-ai/linux-niri.git
+cd linux-niri
+./arch-niri-setup.sh
+```
 
 ## Polaris game streaming (optional)
 
