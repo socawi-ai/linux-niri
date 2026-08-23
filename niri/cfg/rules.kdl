@@ -1,36 +1,63 @@
+// ──────────────────────────────────────────────
+// General window rules
+// ──────────────────────────────────────────────
+
 window-rule {
     match app-id=r"^code"
     open-on-workspace "Dev"
     default-column-width { proportion 0.5; }
 }
 
-
 window-rule {
     match app-id="me.proton.Mail"
     open-on-workspace "Web"
 }
 
+// ──────────────────────────────────────────────
+// Steam
+// ──────────────────────────────────────────────
+
+// Normal Steam client.
+// No workspace assignment — keeps local Steam flexible.
 window-rule {
     match app-id="steam" title=r"^[Ss]team$"
-    open-on-workspace "Games"
     open-focused false
 }
 
+// Steam Big Picture.
+// This is the streaming target.
 window-rule {
-    geometry-corner-radius 15 // Set every window radius to 20
-    clip-to-geometry true
-    opacity 0.9
-    background-effect {
-        blur true
-    }
+    match app-id="steam" title=r"^Steam Big Picture Mode$"
+    open-on-workspace "Stream"
+    open-fullscreen true
+    open-focused false
 }
 
-// ─── Godot Engine ───
+// Steam notifications.
+window-rule {
+    match app-id="steam" title=r"^notificationtoasts_\d+_desktop$"
+    default-floating-position x=10 y=10 relative-to="bottom-right"
+    open-focused false
+}
+
+// Steam games.
+// IMPORTANT: no workspace assignment here.
+// This prevents local games from being forced onto Stream.
+window-rule {
+    match app-id=r"^steam_app_\d+$"
+    open-fullscreen true
+}
+
+// ──────────────────────────────────────────────
+// Godot Engine
+// ──────────────────────────────────────────────
+
 window-rule {
     match app-id="Godot"
     open-on-workspace "Dev"
     default-column-width { proportion 0.5; }
     opacity 1.0
+
     background-effect {
         blur false
     }
@@ -41,33 +68,32 @@ window-rule {
     open-floating true
 }
 
-
-// if you use steam you will probably like these
-window-rule {
-    match app-id="steam"
-    exclude title=r"^[Ss]team$"
-    open-floating true
-    open-focused false
-    open-on-workspace "Games"
-}
+// ──────────────────────────────────────────────
+// General appearance
+// ──────────────────────────────────────────────
 
 window-rule {
-    match app-id="steam" title=r"^notificationtoasts_\d+_desktop$"
-    default-floating-position x=10 y=10 relative-to="bottom-right"
-    open-focused false
+    geometry-corner-radius 15
+    clip-to-geometry true
+    opacity 0.9
+
+    background-effect {
+        blur true
+    }
 }
 
-// Steam games launched via the Steam Linux Runtime get app-id "steam_app_<appid>"
-window-rule {
-    match app-id=r"^steam_app_\d+$"
-    open-fullscreen true
-}
+// ──────────────────────────────────────────────
+// Nautilus
+// ──────────────────────────────────────────────
 
-// Common dialogs that are awkward as tiled columns.
 window-rule {
     match app-id="org.gnome.Nautilus" title=r".*(Properties|Preferences).*"
     open-floating true
 }
+
+// ──────────────────────────────────────────────
+// Firefox
+// ──────────────────────────────────────────────
 
 window-rule {
     match app-id="firefox" title=r".*(Picture-in-Picture|Library|Downloads|Bibliotek|Hämtningar|Hämtade filer).*"
@@ -84,10 +110,18 @@ window-rule {
     open-floating true
 }
 
+// ──────────────────────────────────────────────
+// Alacritty
+// ──────────────────────────────────────────────
+
 window-rule {
     match app-id="Alacritty" title=r".*(nmtui|bluetoothctl).*"
     open-floating true
 }
+
+// ──────────────────────────────────────────────
+// Noctalia
+// ──────────────────────────────────────────────
 
 layer-rule {
     match namespace="^noctalia-wallpaper*"

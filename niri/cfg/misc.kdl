@@ -1,6 +1,18 @@
-workspace "Web"
-workspace "Dev"
-workspace "Games"
+workspace "Web" {
+    open-on-output "DP-1"
+}
+
+workspace "Dev" {
+    open-on-output "DP-1"
+}
+
+workspace "Games" {
+    open-on-output "DP-1"
+}
+
+workspace "Stream" {
+    open-on-output "DP-2"
+}
 
     prefer-no-csd
     screenshot-path "~/Screenshots/%Y-%m-%dT%H:%M:%S.png"

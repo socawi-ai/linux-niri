@@ -129,37 +129,6 @@ cd linux-niri
 ./arch-niri-setup.sh
 ```
 
-## Polaris game streaming (optional)
-
-`install-polaris.sh` installs [Polaris](https://github.com/papi-ux/polaris)
-(a self-hosted GameStream host for Nova and Moonlight-compatible clients)
-from the latest GitHub release, verifying each downloaded package against
-the sha256 digest GitHub publishes for it before installing. Not called by
-the setup scripts above and doesn't require them — just assumes Steam is
-already installed if you plan to stream it. Fedora gets the
-`Polaris-fedoraNN-x86_64.rpm` asset matching your Fedora version (falling
-back to whatever build is published, with a warning, if Polaris hasn't cut
-one for your exact release yet); Arch gets `Polaris-arch-x86_64.pkg.tar.zst`
-via `pacman -U`. Both run `sudo -H polaris --setup-host` and enable the
-`polaris` user service to start on login:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/install-polaris.sh -o install-polaris.sh
-chmod +x install-polaris.sh
-./install-polaris.sh
-```
-
-Afterwards, open `https://localhost:47990` once in a browser to create the
-web account and pair a client (Nova or Moonlight) — this one-time step
-can't be scripted. Steam games don't need a separate sync script: add them
-from the web UI's Applications tab (built-in library scan, optional
-SteamGridDB cover art), or launch Steam Big Picture directly. If capture
-doesn't work out of the box, see
-[the Polaris configuration docs](https://papi-ux.com/docs/configuration/)
-about `POLARIS_ENABLE_KMS=1` (re-run the script) or
-`sudo -H polaris --setup-host --enable-kms` manually — off by default since
-it's explicitly situational, not a universal requirement.
-
 ## Backups
 
 Each script backs up replaced files before touching them, and writes a
