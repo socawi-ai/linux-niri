@@ -74,6 +74,12 @@ REFIND_CONF_PATH="${REFIND_CONF_PATH:-}"
 # (or lack of one) is already in your refind.conf alone.
 REFIND_RESOLUTION_WIDTH="${REFIND_RESOLUTION_WIDTH:-3440}"
 REFIND_RESOLUTION_HEIGHT="${REFIND_RESOLUTION_HEIGHT:-1440}"
+# rEFInd only keeps its graphical theme on screen for macOS entries by
+# default; booting Linux drops to a plain text console for the handoff,
+# flashing messages like "Loading Linux vmlinuz-linux..." over the theme.
+# Set to "" to leave whatever use_graphics_for setting (or lack of one) is
+# already in your refind.conf alone.
+REFIND_USE_GRAPHICS_FOR="${REFIND_USE_GRAPHICS_FOR:-osx,linux}"
 # On a non-UKI setup, rEFInd's loose-kernel scan (vmlinuz found directly in
 # /boot rather than a bootloader-binary directory) only picks up a
 # distro-specific icon if this exact file is present — otherwise it falls
@@ -994,6 +1000,7 @@ install_refind_theme() {
   # Independent of whether the theme itself installs below -- a resolution
   # fix is a real improvement even if the theme repo fails to clone.
   configure_refind_resolution "$refind_conf"
+  configure_refind_use_graphics_for "$refind_conf"
 
   log "Fetching rEFInd theme from $REFIND_THEME_REPO."
   clone_or_update_git_repo "$REFIND_THEME_REPO" "$REFIND_THEME_DIR"
@@ -1089,6 +1096,43 @@ EOF
 
   log "Set rEFInd resolution to ${REFIND_RESOLUTION_WIDTH}x${REFIND_RESOLUTION_HEIGHT} in $refind_conf."
   record_change "Set rEFInd resolution to ${REFIND_RESOLUTION_WIDTH}x${REFIND_RESOLUTION_HEIGHT} in $refind_conf (without this, rEFInd auto-picks a GOP mode that often doesn't match the real display, distorting the theme's banner/icons)."
+}
+
+# Rewrites (or adds) refind.conf's use_graphics_for line, uncommenting it if
+# it's only present as the stock commented-out sample line. Only this one
+# line is touched -- like configure_refind_resolution(), nothing else in
+# refind.conf is managed by this script.
+configure_refind_use_graphics_for() {
+  local refind_conf="$1"
+
+  [[ -n "$REFIND_USE_GRAPHICS_FOR" ]] || {
+    log "REFIND_USE_GRAPHICS_FOR not set; leaving rEFInd's use_graphics_for setting as-is."
+    return 0
+  }
+
+  if run_sudo grep -qE "^use_graphics_for[[:space:]]+${REFIND_USE_GRAPHICS_FOR}[[:space:]]*\$" "$refind_conf"; then
+    log "use_graphics_for already set to '$REFIND_USE_GRAPHICS_FOR' in $refind_conf."
+    return 0
+  fi
+
+  backup_system_path "$refind_conf"
+  local tmp; tmp="$(mktemp)"
+  run_sudo awk -v value="$REFIND_USE_GRAPHICS_FOR" '
+    BEGIN { done = 0 }
+    /^[[:space:]]*#?[[:space:]]*use_graphics_for([[:space:]]|$)/ && !done {
+      print "use_graphics_for " value
+      done = 1
+      next
+    }
+    { print }
+    END { if (!done) print "use_graphics_for " value }
+  ' "$refind_conf" >"$tmp"
+
+  run_sudo install -m 0644 "$tmp" "$refind_conf"
+  rm -f "$tmp"
+
+  log "Set use_graphics_for to '$REFIND_USE_GRAPHICS_FOR' in $refind_conf."
+  record_change "Set use_graphics_for to '$REFIND_USE_GRAPHICS_FOR' in $refind_conf (without this, rEFInd drops to a text console for the Linux boot handoff, showing messages like 'Loading Linux vmlinuz-linux...' over the theme)."
 }
 
 disable_hardware_watchdog() {

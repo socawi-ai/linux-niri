@@ -59,9 +59,12 @@ the script checks for an existing `refind.conf` right at the start and
 refuses to run if it can't find one (set `INSTALL_REFIND_THEME=0` to run
 without rEFInd at all). It only ever themes an existing rEFInd install —
 never installs rEFInd itself or touches its existing menu entries/scan
-config, beyond adding the theme and setting an explicit `resolution` (fixes
+config, beyond adding the theme, setting an explicit `resolution` (fixes
 distorted banner/icons under the theme; set
-`REFIND_RESOLUTION_WIDTH`/`HEIGHT=""` to leave your existing setting alone).
+`REFIND_RESOLUTION_WIDTH`/`HEIGHT=""` to leave your existing setting alone),
+and setting `use_graphics_for osx,linux` (keeps the graphical theme on
+screen through the Linux boot handoff instead of dropping to a text console;
+set `REFIND_USE_GRAPHICS_FOR=""` to leave your existing setting alone).
 
 - Niri, greetd, Alacritty, Nautilus, Fish, Firefox, PipeWire, pavucontrol,
   desktop portals, GTK/Qt Wayland support — official repos
