@@ -19,6 +19,8 @@ Works the same over SSH/bare TTY as in a desktop terminal: download, `chmod +x`,
 - McMojave cursors, Nautilus Open Any Terminal (set to Alacritty)
 - LACT (`lactd` service), for AMD/Nvidia/Intel GPU control
 - VS Code, Steam, Plymouth spinner
+- Hardware-watchdog module blacklist, to silence a common "watchdog did not
+  stop" shutdown warning
 
 It also deploys this repo's configs and wallpapers to `~/.config`,
 `~/.local/state`, and the user's pictures folder.

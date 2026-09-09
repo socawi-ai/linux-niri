@@ -58,6 +58,22 @@ GRUB_GFXMODE="${GRUB_GFXMODE:-3440x1440,2560x1440,1920x1080,auto}"
 GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
 GRUB_CONFIG_FILE="${GRUB_CONFIG_FILE:-/etc/default/grub}"
 GRUB_MKCONFIG_OUTPUT="${GRUB_MKCONFIG_OUTPUT:-/boot/grub2/grub.cfg}"
+
+# Hardware-specific quirk, not a universal need: many boards' watchdog chips
+# can't be cleanly disarmed on shutdown, so the kernel logs "watchdog did not
+# stop!" every time -- harmless but noisy. Set DISABLE_HARDWARE_WATCHDOG=0 if
+# your hardware doesn't hit this.
+#
+# nowatchdog (kernel cmdline) only disables the kernel's own lockup NMI
+# detector -- it does NOT reliably stop a hardware watchdog timer chip from
+# arming in the first place. Blacklisting the actual driver module is what
+# stops the shutdown warning; nowatchdog is added too as a harmless
+# companion setting, via grubby (already used by the Plymouth setup above).
+# The two listed below cover the large majority of desktop Intel/AMD
+# chipsets -- check `dmesg | grep -i watchdog` on your machine if yours
+# isn't one of these and add it to the list.
+DISABLE_HARDWARE_WATCHDOG="${DISABLE_HARDWARE_WATCHDOG:-1}"
+WATCHDOG_MODULES_TO_BLACKLIST="${WATCHDOG_MODULES_TO_BLACKLIST:-iTCO_wdt iTCO_vendor_support sp5100_tco}"
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
 NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-13.png}"
@@ -803,6 +819,33 @@ configure_plymouth_and_grub() {
   record_change "Configured GRUB timeout to $GRUB_TIMEOUT_SECONDS seconds."
 }
 
+disable_hardware_watchdog() {
+  [[ "$DISABLE_HARDWARE_WATCHDOG" == "1" ]] || {
+    log "Hardware watchdog disabling is disabled."
+    return 0
+  }
+
+  if [[ -n "$WATCHDOG_MODULES_TO_BLACKLIST" ]]; then
+    local module blacklist_lines=""
+    for module in $WATCHDOG_MODULES_TO_BLACKLIST; do
+      blacklist_lines+="blacklist $module"$'\n'
+    done
+    printf '%s' "$blacklist_lines" | write_system_file /etc/modprobe.d/watchdog-blacklist.conf 0644
+    log "Blacklisted hardware watchdog modules: $WATCHDOG_MODULES_TO_BLACKLIST."
+    record_change "Blacklisted hardware watchdog modules ($WATCHDOG_MODULES_TO_BLACKLIST) in /etc/modprobe.d/watchdog-blacklist.conf. Takes effect on next boot — blacklisting doesn't unload an already-loaded module."
+  fi
+
+  if have_command grubby; then
+    if run_sudo grubby --update-kernel=ALL --args="nowatchdog"; then
+      record_change "Added the nowatchdog kernel parameter via grubby (suppresses a harmless 'watchdog did not stop' shutdown warning)."
+    else
+      warn "Could not add the nowatchdog kernel parameter with grubby."
+    fi
+  else
+    warn "grubby was not found; the nowatchdog kernel parameter was not added."
+  fi
+}
+
 install_vscode() {
   [[ "$INSTALL_VSCODE" == "1" ]] || {
     log "VS Code installation is disabled."
@@ -1434,6 +1477,7 @@ main() {
 
   section "Boot visuals"
   configure_plymouth_and_grub
+  disable_hardware_watchdog
 
   section "Noctalia"
   install_noctalia_packages
