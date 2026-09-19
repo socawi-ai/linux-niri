@@ -599,6 +599,21 @@ enable_fedora_third_party_repos() {
   else
     warn "fedora-third-party command is not available after installing fedora-workstation-repositories."
   fi
+
+  disable_google_chrome_repo
+}
+
+disable_google_chrome_repo() {
+  [[ "$ENABLE_GOOGLE_CHROME_REPO" == "1" ]] && return 0
+
+  local repo_file="/etc/yum.repos.d/google-chrome.repo"
+  [[ -f "$repo_file" ]] || return 0
+  grep -q '^enabled=1' "$repo_file" || return 0
+
+  log "Disabling the Google Chrome repository."
+  backup_system_path "$repo_file"
+  run_sudo sed -i 's/^enabled=1/enabled=0/' "$repo_file"
+  record_change "Disabled the Google Chrome repository."
 }
 
 enable_rpmfusion() {
