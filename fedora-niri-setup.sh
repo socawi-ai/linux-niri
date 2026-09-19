@@ -21,6 +21,10 @@ DNF_SKIP_UNAVAILABLE="${DNF_SKIP_UNAVAILABLE:-1}"
 ENABLE_NOCTALIA_COPR="${ENABLE_NOCTALIA_COPR:-1}"
 ENABLE_GREETD="${ENABLE_GREETD:-1}"
 ENABLE_FEDORA_THIRD_PARTY_REPOS="${ENABLE_FEDORA_THIRD_PARTY_REPOS:-1}"
+# fedora-third-party enable turns on every bundled third-party repo at once
+# (there's no per-repo flag on the tool itself); Google Chrome's is disabled
+# back off right after, since it's not wanted on this machine.
+ENABLE_GOOGLE_CHROME_REPO="${ENABLE_GOOGLE_CHROME_REPO:-0}"
 ENABLE_RPMFUSION="${ENABLE_RPMFUSION:-1}"
 INSTALL_FLATPAK="${INSTALL_FLATPAK:-1}"
 ADD_FLATHUB_REMOTE="${ADD_FLATHUB_REMOTE:-1}"
@@ -543,6 +547,12 @@ install_fedora_packages() {
     dbus
     dconf
     libsecret
+    gnome-keyring
+    # Ships pam_gnome_keyring.so. Without it, greetd's PAM stack silently
+    # skips unlocking the login keyring (logs "PAM adding faulty module"),
+    # so anything using libsecret pops a manual "unlock keyring" prompt on
+    # every login instead of auto-unlocking with the login password.
+    gnome-keyring-pam
     avahi
     nss-mdns
     gvfs
