@@ -26,6 +26,12 @@ LSFG_VK_BUILD_TYPE="${LSFG_VK_BUILD_TYPE:-Release}"
 LSFG_VK_ENABLE_LTO="${LSFG_VK_ENABLE_LTO:-1}"
 LSFG_VK_BUILD_UI="${LSFG_VK_BUILD_UI:-1}"
 INSTALL_VULKAN_TOOLS="${INSTALL_VULKAN_TOOLS:-1}"
+# Fedora doesn't scan /usr/local/lib64 by default, but the installed layer's
+# manifest references it by bare filename -- so the Vulkan loader silently
+# fails to dlopen it (for every Vulkan app, not just one game) unless that
+# directory is registered. See FIX_LIBRARY_SEARCH_PATH below.
+FIX_LIBRARY_SEARCH_PATH="${FIX_LIBRARY_SEARCH_PATH:-1}"
+VERIFY_LAYER_LOADS="${VERIFY_LAYER_LOADS:-1}"
 
 declare -a CHANGES=()
 declare -a WARNINGS=()
@@ -143,6 +149,51 @@ build_and_install() {
   record_change "Built and installed lsfg-vk to $LSFG_VK_INSTALL_PREFIX."
 }
 
+ensure_library_path_registered() {
+  [[ "$FIX_LIBRARY_SEARCH_PATH" == "1" ]] || {
+    log "Library search path check is disabled."
+    return 0
+  }
+
+  local lib_path lib_dir
+  lib_path="$(find "$LSFG_VK_INSTALL_PREFIX" -name 'liblsfg-vk-layer.so' 2>/dev/null | head -n1)"
+  if [[ -z "$lib_path" ]]; then
+    warn "Could not locate the installed liblsfg-vk-layer.so under $LSFG_VK_INSTALL_PREFIX to check its library path."
+    return 0
+  fi
+  lib_dir="$(dirname "$lib_path")"
+
+  if ldconfig -p | grep -q 'liblsfg-vk-layer\.so '; then
+    log "liblsfg-vk-layer.so is already resolvable via the system library path."
+    return 0
+  fi
+
+  log "$lib_dir is not on the default library search path (common for /usr/local on Fedora); the Vulkan loader would silently fail to dlopen the layer. Registering it with ldconfig."
+  echo "$lib_dir" | sudo tee /etc/ld.so.conf.d/lsfg-vk.conf >/dev/null || die "Could not write /etc/ld.so.conf.d/lsfg-vk.conf."
+  sudo ldconfig || die "ldconfig failed."
+  record_change "Registered $lib_dir with ldconfig so the Vulkan loader can find liblsfg-vk-layer.so."
+}
+
+verify_layer_loads() {
+  [[ "$VERIFY_LAYER_LOADS" == "1" ]] || return 0
+
+  have_command vkcube || {
+    warn "vkcube not found; skipping functional verification that the layer actually loads (set INSTALL_VULKAN_TOOLS=1 to enable this check)."
+    return 0
+  }
+
+  local log_file
+  log_file="$(mktemp)"
+  timeout 3 env VK_LOADER_DEBUG=layer vkcube >"$log_file" 2>&1 || true
+
+  if grep -q 'Insert instance layer "VK_LAYER_LSFGVK_frame_generation"' "$log_file"; then
+    log "Verified: the Vulkan loader successfully loads the lsfg-vk layer (checked with vkcube)."
+  else
+    warn "vkcube did not load the lsfg-vk layer even after this install. Run 'VK_LOADER_DEBUG=layer vkcube 2>&1 | grep -i lsfgvk' yourself to investigate."
+  fi
+  rm -f "$log_file"
+}
+
 run_healthcheck() {
   local cli_bin
   cli_bin="$(command -v lsfg-vk-cli || true)"
@@ -184,10 +235,9 @@ print_summary() {
   printf '     the "dll" key under [global] in ~/.config/lsfg-vk/conf.toml.\n'
   printf '  2. Run "lsfg-vk-ui" (or ~/.local/bin/lsfg-vk-ui) to create a profile,\n'
   printf '     or launch a game with LSFGVK_PROFILE=<name> to pick one at runtime.\n'
-  printf '  3. Verify the layer loads with: vkcube  (or DISABLE_LSFGVK=1 vkcube to\n'
-  printf '     compare). Its pacing mode requires Vsync enabled to avoid duplicated\n'
+  printf '     Its pacing mode requires Vsync enabled in-game to avoid duplicated\n'
   printf '     frames.\n'
-  printf '  4. Full docs: https://lsfg-vk.dev/docs/getting-started/\n'
+  printf '  3. Full docs: https://lsfg-vk.dev/docs/getting-started/\n'
   printf '\n'
 }
 
@@ -196,6 +246,8 @@ main() {
   install_dependencies
   clone_or_update_repo
   build_and_install
+  ensure_library_path_registered
+  verify_layer_loads
   run_healthcheck
   print_summary
 }
