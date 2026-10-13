@@ -6,10 +6,10 @@ set -Eeuo pipefail
 # Follows the official "Building from Source" guide for Fedora:
 # https://lsfg-vk.dev/docs/installation/building-from-source/
 #
-# Fully standalone -- run this by itself, once, on a machine that already
-# has its desktop set up. Not called by fedora-niri-setup.sh, and does not
-# require it to have been run first. Fedora only -- Arch has its own AUR
-# packages (lsfg-vk / lsfg-vk-bin / lsfg-vk-git) and doesn't need this.
+# Run by fedora-niri-setup.sh at the end of its setup (INSTALL_LSFG_VK=1,
+# the default), but also standalone: run it by itself on a machine that
+# already has its desktop set up; re-running updates and rebuilds lsfg-vk.
+# Fedora only.
 #
 # Requires Lossless Scaling (https://store.steampowered.com/app/993090)
 # purchased and installed through Steam -- lsfg-vk is a re-implementation
@@ -68,7 +68,7 @@ have_command() {
 
 require_fedora() {
   [[ -f /etc/os-release ]] || die "Cannot detect distro: /etc/os-release not found."
-  grep -qi '^ID=fedora' /etc/os-release || die "This script only supports Fedora. Arch has its own lsfg-vk/lsfg-vk-bin/lsfg-vk-git AUR packages -- use those instead."
+  grep -qi '^ID=fedora' /etc/os-release || die "This script only supports Fedora."
   have_command dnf || die "dnf was not found."
 }
 
@@ -182,7 +182,7 @@ print_summary() {
   printf '     > Properties > Betas). lsfg-vk looks for its "lsfg-vk.dll" in the\n'
   printf '     usual Steam library locations; if yours is nonstandard, set it via\n'
   printf '     the "dll" key under [global] in ~/.config/lsfg-vk/conf.toml.\n'
-  printf '  2. Run "lsfg-vk-ui" (or ~/.local/bin/lsfg-vk-ui) to create a profile,\n'
+  printf '  2. Run "lsfg-vk-ui" (installed to %s/bin) to create a profile,\n' "$LSFG_VK_INSTALL_PREFIX"
   printf '     or launch a game with LSFGVK_PROFILE=<name> to pick one at runtime.\n'
   printf '  3. Verify the layer loads with: vkcube  (or DISABLE_LSFGVK=1 vkcube to\n'
   printf '     compare). Its pacing mode requires Vsync enabled to avoid duplicated\n'

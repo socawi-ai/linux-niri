@@ -1,6 +1,6 @@
 # Linux Niri Setup
 
-Personal setup scripts for a Niri desktop on Fedora and Arch Linux.
+Personal setup scripts for a Niri desktop on Fedora.
 
 This is in testing. Read the script before running it, and only run it on a system you
 are prepared to repair.
@@ -18,12 +18,28 @@ Works the same over SSH/bare TTY as in a desktop terminal: download, `chmod +x`,
 - PipeWire, pavucontrol, desktop portals, GTK/Qt Wayland support
 - McMojave cursors, Nautilus Open Any Terminal (set to Alacritty)
 - LACT (`lactd` service), for AMD/Nvidia/Intel GPU control
-- VS Code, Steam, Plymouth spinner
+- VS Code, Steam (RPM Fusion), gamescope, Plymouth spinner
+- Flatpak + Flathub; Proton Mail, LocalSend, ProtonUp-Qt from Flathub
 - Hardware-watchdog module blacklist, to silence a common "watchdog did not
   stop" shutdown warning
 
 It also deploys this repo's configs and wallpapers to `~/.config`,
 `~/.local/state`, and the user's pictures folder.
+
+At the end it runs this repo's other setup scripts (each also works on its
+own, see below). Turn any of them off with its variable:
+
+- `INSTALL_REFIND=0`: the themed rEFInd boot menu (`fedora-refind-setup.sh`)
+- `INSTALL_LSFG_VK=0`: lsfg-vk frame generation (`install-lsfg-vk.sh`)
+- `INSTALL_SUNSHINE=0`: the Sunshine streaming host (`install-sunshine.sh`)
+- `INSTALL_STEAM_SUNSHINE_SYNC=0`: the game picker that adds installed Steam
+  games to Sunshine (`steam-sunshine-sync.sh`). It shows on the terminal and
+  isn't in the log. Right after a fresh install there are no games yet, so
+  it just notes that; run the installer again, or the script on its own,
+  once games are installed.
+
+If one of them fails, the setup warns and finishes the rest; fix the problem
+and run that script on its own.
 
 Run:
 
@@ -33,7 +49,19 @@ chmod +x fedora-niri-setup.sh
 ./fedora-niri-setup.sh
 ```
 
-Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh`
+Run from a terminal, it first opens a menu (same look as the Steam game
+picker) where you tick the optional features: Steam, gamescope, LACT, VS Code,
+Flatpak and the Flatpak apps, cursors, the login screen, Plymouth, the
+watchdog fix, rEFInd, lsfg-vk, Sunshine and the Steam game sync. Niri,
+Noctalia, the base packages and the configs are always installed. A
+confirmation screen shows what will and won't be installed before anything
+changes; Quit leaves the machine untouched.
+
+Each feature also has an environment variable (see the top of the script).
+They set what's pre-ticked in the menu, and are used as they are with
+`--no-menu` (or `SETUP_MENU=0`), or when there's no terminal.
+
+Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh --no-menu`
 
 ## Fedora rEFInd boot theme (optional)
 
@@ -42,7 +70,9 @@ Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh`
 ([rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils)). Additive and
 standalone: installs rEFInd as a new firmware boot entry alongside Fedora's
 existing one, chainloads into Fedora's own shim/GRUB/kernel chain, and hides
-GRUB's menu so rEFInd is the only one you see.
+GRUB's menu so rEFInd is the only one you see. `fedora-niri-setup.sh` runs
+it by default; once it has run, re-running `fedora-niri-setup.sh` leaves
+GRUB's timeout alone.
 
 Run:
 
@@ -52,87 +82,18 @@ chmod +x fedora-refind-setup.sh
 ./fedora-refind-setup.sh
 ```
 
-## Arch Linux
+## Frame generation and streaming
 
-`arch-niri-setup.sh` installs the same desktop, adapted to pacman/AUR. It
-assumes the bootloader is already installed and preconfigured (e.g. via
-`archinstall`) and never touches it, **except rEFInd, which it requires**:
-the script checks for an existing `refind.conf` right at the start and
-refuses to run if it can't find one (set `INSTALL_REFIND_THEME=0` to run
-without rEFInd at all). It only ever themes an existing rEFInd install —
-never installs rEFInd itself or touches its existing menu entries/scan
-config, beyond adding the theme, setting an explicit `resolution` (fixes
-distorted banner/icons under the theme; set
-`REFIND_RESOLUTION_WIDTH`/`HEIGHT=""` to leave your existing setting alone),
-and setting `use_graphics_for osx,linux` (keeps the graphical theme on
-screen through the Linux boot handoff instead of dropping to a text console;
-set `REFIND_USE_GRAPHICS_FOR=""` to leave your existing setting alone).
-
-- Niri, greetd, Alacritty, Nautilus, Fish, Firefox, PipeWire, pavucontrol,
-  desktop portals, GTK/Qt Wayland support — official repos
-- Flatpak + Flathub; Proton Mail, LocalSend, ProtonUp-Qt from Flathub
-- [arch-update](https://github.com/Antiz96/arch-update) with its update
-  timer, from the AUR
-- Noctalia v5 + Greeter (stable, AUR), McMojave cursors (AUR), Nautilus Open
-  Any Terminal (AUR), LACT (official repo), VS Code (AUR)
-- Steam (via `multilib`)
-- [rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils) theme (required, see
-  above) — plus a hardware-watchdog module blacklist to silence a common
-  "watchdog did not stop" shutdown warning
-
-An AUR helper (`paru` by default, `yay` supported) is bootstrapped
-automatically if missing. Most behaviors above are toggleable via env vars —
-see the script header for the full list.
-
-It downloads the same repo configs and wallpapers as the Fedora script.
-
-Run:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/arch-niri-setup.sh -o arch-niri-setup.sh
-chmod +x arch-niri-setup.sh
-./arch-niri-setup.sh
-```
-
-Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./arch-niri-setup.sh`
-
-## archinstall profile (optional)
-
-`archinstall/user_configuration.json` reproduces this machine's base-system
-choices in [archinstall](https://github.com/archlinux/archinstall) (v4.4+):
-disk layout (btrfs on a single NVMe drive, `@`/`@home`/`@log`/`@pkg`
-subvolumes, zstd compression), rEFInd as the bootloader (archinstall installs
-and configures it directly — no UKI, Plymouth's `spinner` theme), zram swap,
-Swedish locale/timezone, and NetworkManager. It does **not** cover the
-desktop — that's still `arch-niri-setup.sh` above, run after first boot.
-
-**This wipes `/dev/nvme0n1`.** Check `lsblk` on the target machine first and
-edit `disk_config.device_modifications[0].device` in the JSON if the disk
-differs from this one.
-
-On the Arch ISO (`git` is preinstalled there):
-
-```bash
-git clone https://github.com/socawi-ai/linux-niri.git
-cd linux-niri
-lsblk                                          # confirm the disk target above
-archinstall --config archinstall/user_configuration.json
-```
-
-Deliberately not `--silent`, and no credentials file: every guided screen is
-pre-filled from the config but still shown for review before anything is
-written, and you type the username/password directly when archinstall asks
-for them — nothing sensitive ever needs to live in this repo.
-
-The live ISO's filesystem doesn't survive the reboot into the new install, so
-clone the repo again afterwards to run `arch-niri-setup.sh` for the desktop
-layer:
-
-```bash
-git clone https://github.com/socawi-ai/linux-niri.git
-cd linux-niri
-./arch-niri-setup.sh
-```
+- `install-lsfg-vk.sh` builds and installs
+  [lsfg-vk](https://lsfg-vk.dev) (Lossless Scaling frame generation for
+  Vulkan games). Needs Lossless Scaling bought and installed on Steam.
+- `install-sunshine.sh` installs [Sunshine](https://github.com/LizardByte/Sunshine)
+  from LizardByte's COPR, sets the capture output (`DP-2` by default, override
+  with `SUNSHINE_CAPTURE_OUTPUT`) and starts it on login. Open
+  https://localhost:47990 once afterwards to create Sunshine's admin login.
+- `steam-sunshine-sync.sh` adds installed Steam games (native or Flatpak) to
+  Sunshine, with cover art. Run it again whenever games change; `--select`
+  opens the game picker, `--help` shows the rest.
 
 ## Backups
 
@@ -141,6 +102,4 @@ timestamped log to the user's home directory.
 
 - Fedora: `~/.local/share/fedora-niri-setup/backups/` (user),
   `/var/backups/fedora-niri-setup/` (system)
-- Arch: `~/.local/share/arch-niri-setup/backups/` (user),
-  `/var/backups/arch-niri-setup/` (system)
 - rEFInd setup: `/var/backups/fedora-refind-setup/` (system only)

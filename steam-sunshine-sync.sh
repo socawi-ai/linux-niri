@@ -5,8 +5,8 @@ set -Eeuo pipefail
 # apps.json as detached "steam://rungameid/<appid>" launchers, with cover
 # art pulled from Steam's public CDN (no SteamGridDB account needed).
 #
-# Fully standalone -- does not require fedora-niri-setup.sh, arch-niri-setup.sh,
-# or install-sunshine.sh to have been run first. Steam and Sunshine are
+# Fully standalone -- does not require fedora-niri-setup.sh or
+# install-sunshine.sh to have been run first. Steam and Sunshine are
 # just expected to already be installed by the time this runs.
 #
 # Safe to re-run at any time (e.g. after installing/uninstalling games): it
@@ -18,7 +18,6 @@ set -Eeuo pipefail
 # drops out on the next sync with no separate cleanup step needed.
 
 AUTO_INSTALL_DEPENDENCIES="${AUTO_INSTALL_DEPENDENCIES:-1}"
-ASSUME_YES="${ASSUME_YES:-1}"
 
 SUNSHINE_CONFIG_DIR="${SUNSHINE_CONFIG_DIR:-$HOME/.config/sunshine}"
 SUNSHINE_APPS_JSON="${SUNSHINE_APPS_JSON:-$SUNSHINE_CONFIG_DIR/apps.json}"
@@ -39,6 +38,14 @@ NIRI_NATIVE_WORKSPACE="${NIRI_NATIVE_WORKSPACE:-Games}"
 # streamed). Set QUIT_STEAM_ON_STREAM_END=0 to leave Steam running instead.
 QUIT_STEAM_ON_STREAM_END="${QUIT_STEAM_ON_STREAM_END:-1}"
 
+# How a synced game is launched. Empty = auto: native Steam ("steam") if it's
+# installed, otherwise Flatpak Steam (see resolve_steam_launch_command).
+STEAM_LAUNCH_COMMAND="${STEAM_LAUNCH_COMMAND:-}"
+
+# Every write of apps.json keeps a timestamped backup next to it; only the
+# newest ones are kept.
+APPS_JSON_BACKUPS_TO_KEEP="${APPS_JSON_BACKUPS_TO_KEEP:-5}"
+
 # Native and Flatpak Steam both keep their own separate data directories on
 # Linux; check both so it doesn't matter which one games are installed
 # through. libraryfolders.vdf inside each then points at any additional
@@ -52,6 +59,7 @@ DRY_RUN=0
 FORCE_SELECT=0
 VERBOSE=0
 LIST_ONLY=0
+SKIP_IF_NO_GAMES=0
 
 # whiptail's default theme is light text on a blue window, which reads
 # poorly in a lot of terminal color schemes -- explicit light theme
@@ -146,12 +154,16 @@ Options:
   --no-art      Skip downloading cover art
   --dry-run     Show what would change without writing anything
   --verbose     Print extra diagnostic detail
+  --skip-if-no-games
+                Exit successfully (with a note) instead of failing when Steam
+                or installed games aren't found, e.g. right after a fresh
+                install (used by fedora-niri-setup.sh)
   -h, --help    Show this help and exit
 
 Config is overridable via environment variables; see the top of this
 script for the full list (SUNSHINE_APPS_JSON, SUNSHINE_COVERS_DIR,
-SELECTION_FILE, NIRI_STREAM_WORKSPACE, NIRI_NATIVE_WORKSPACE,
-QUIT_STEAM_ON_STREAM_END, ...).
+SELECTION_FILE, STEAM_LAUNCH_COMMAND, NIRI_STREAM_WORKSPACE,
+NIRI_NATIVE_WORKSPACE, QUIT_STEAM_ON_STREAM_END, ...).
 EOF
 }
 
@@ -163,6 +175,7 @@ parse_args() {
       --no-art) FETCH_COVER_ART=0 ;;
       --dry-run) DRY_RUN=1 ;;
       --verbose) VERBOSE=1 ;;
+      --skip-if-no-games) SKIP_IF_NO_GAMES=1 ;;
       -h|--help) usage; exit 0 ;;
       *) die "Unknown argument: $1 (see --help)." ;;
     esac
@@ -170,37 +183,17 @@ parse_args() {
   done
 }
 
-detect_distro() {
-  [[ -f /etc/os-release ]] || { printf 'unknown'; return 0; }
-  local id id_like
-  id="$(grep -oP '^ID=\K.*' /etc/os-release 2>/dev/null | tr -d '"')"
-  id_like="$(grep -oP '^ID_LIKE=\K.*' /etc/os-release 2>/dev/null | tr -d '"')"
-  case "$id $id_like" in
-    *fedora*) printf 'fedora' ;;
-    *arch*) printf 'arch' ;;
-    *) printf 'unknown' ;;
-  esac
-}
-
-DISTRO="$(detect_distro)"
-
 suggest_install_cmd() {
-  local pkgs="$1"
-  case "$DISTRO" in
-    fedora) printf 'sudo dnf install %s' "$pkgs" ;;
-    arch) printf 'sudo pacman -S %s' "$pkgs" ;;
-    *) printf 'install: %s' "$pkgs" ;;
-  esac
+  printf 'sudo dnf install %s' "$1"
 }
 
-# Maps a generic dependency name to the package that provides it on the
-# detected distro -- names diverge between Fedora and Arch for a couple of
-# these (ImageMagick/whiptail), so this can't just reuse the command name.
+# Maps a generic dependency name to the Fedora package that provides it --
+# the package name differs from the command for a couple of these.
 package_name_for() {
   local tool="$1"
   case "$tool" in
-    imagemagick) [[ "$DISTRO" == "fedora" ]] && printf 'ImageMagick' || printf 'imagemagick' ;;
-    whiptail) [[ "$DISTRO" == "fedora" ]] && printf 'newt' || printf 'libnewt' ;;
+    imagemagick) printf 'ImageMagick' ;;
+    whiptail) printf 'newt' ;;
     *) printf '%s' "$tool" ;;
   esac
 }
@@ -209,22 +202,8 @@ install_packages() {
   local -a pkgs=("$@")
   ((${#pkgs[@]})) || return 0
 
-  case "$DISTRO" in
-    fedora)
-      have_command dnf || { warn "dnf was not found; cannot auto-install: ${pkgs[*]}."; return 1; }
-      sudo dnf install -y "${pkgs[@]}" || { warn "Could not install: ${pkgs[*]}."; return 1; }
-      ;;
-    arch)
-      have_command pacman || { warn "pacman was not found; cannot auto-install: ${pkgs[*]}."; return 1; }
-      local args=(-S --needed)
-      [[ "$ASSUME_YES" == "1" ]] && args+=(--noconfirm)
-      sudo pacman "${args[@]}" "${pkgs[@]}" || { warn "Could not install: ${pkgs[*]}."; return 1; }
-      ;;
-    *)
-      warn "Unrecognized distro; cannot auto-install: ${pkgs[*]}. Install manually."
-      return 1
-      ;;
-  esac
+  have_command dnf || { warn "dnf was not found; cannot auto-install: ${pkgs[*]}."; return 1; }
+  sudo dnf install -y "${pkgs[@]}" || { warn "Could not install: ${pkgs[*]}."; return 1; }
 
   record_change "Installed: ${pkgs[*]}."
   return 0
@@ -261,13 +240,34 @@ check_dependencies() {
   fi
 }
 
+# The command a synced game is launched with (followed by
+# steam://rungameid/<appid>). Native Steam if installed, otherwise Flatpak
+# Steam: games found in the Flatpak data directory can't be started with a
+# "steam" command that doesn't exist.
+resolve_steam_launch_command() {
+  if [[ -n "$STEAM_LAUNCH_COMMAND" ]]; then
+    return 0
+  fi
+  if have_command steam; then
+    STEAM_LAUNCH_COMMAND="setsid steam"
+  elif have_command flatpak && flatpak info com.valvesoftware.Steam >/dev/null 2>&1; then
+    STEAM_LAUNCH_COMMAND="setsid flatpak run com.valvesoftware.Steam"
+  else
+    STEAM_LAUNCH_COMMAND="setsid steam"
+    warn "Neither native Steam (steam) nor Flatpak Steam was found; games are synced with \"steam\" as the launcher. Set STEAM_LAUNCH_COMMAND if that's wrong."
+  fi
+  vlog "Steam launch command: $STEAM_LAUNCH_COMMAND"
+}
+
 discover_steam_libraries() {
   local -a roots=() libraries=()
   local d
   for d in "${STEAM_DATA_DIRS[@]}"; do
     [[ -d "$d/steamapps" ]] && roots+=("$d")
   done
-  ((${#roots[@]})) || die "No Steam installation found under: ${STEAM_DATA_DIRS[*]}"
+  # Runs inside < <(...), where die would only end that subshell; with no
+  # Steam data at all, discover_installed_games reports it instead.
+  ((${#roots[@]})) || return 0
 
   local root vdf path
   for root in "${roots[@]}"; do
@@ -308,7 +308,14 @@ discover_installed_games() {
     done
   done < <(discover_steam_libraries)
 
-  ((${#GAME_NAME[@]})) || die "No installed Steam games were found under: ${STEAM_DATA_DIRS[*]}"
+  if ((${#GAME_NAME[@]} == 0)); then
+    local message="No installed Steam games were found under: ${STEAM_DATA_DIRS[*]} (or the library folders they list)."
+    if [[ "$SKIP_IF_NO_GAMES" == "1" ]]; then
+      log "$message Nothing to sync yet; run steam-sunshine-sync.sh again after installing games."
+      exit 0
+    fi
+    die "$message"
+  fi
   vlog "Discovered ${#GAME_NAME[@]} installed game(s)."
 }
 
@@ -348,18 +355,14 @@ save_selection() {
   mv "$SELECTION_FILE.tmp" "$SELECTION_FILE"
 }
 
+# Prints whiptail or dialog, whichever is installed, or nothing. Only
+# detects: it's called inside $(...), where anything an install printed
+# would end up in the result.
 dialog_tool() {
   if have_command whiptail; then
     printf 'whiptail'
-    return 0
-  fi
-  if have_command dialog; then
+  elif have_command dialog; then
     printf 'dialog'
-    return 0
-  fi
-  if ensure_command whiptail; then
-    printf 'whiptail'
-    return 0
   fi
 }
 
@@ -367,6 +370,10 @@ run_picker() {
   local -a appids
   mapfile -t appids < <(printf '%s\n' "${!GAME_NAME[@]}" | sort -n)
   ((${#appids[@]})) || die "No installed Steam games were found."
+
+  # Install whiptail first if neither picker is available (and auto-install
+  # is on) -- outside the $(...) below.
+  have_command whiptail || have_command dialog || ensure_command whiptail || true
 
   local tool
   tool="$(dialog_tool)"
@@ -541,6 +548,16 @@ fetch_cover_art() {
   return 0
 }
 
+# Deletes all but the newest $2 "$1.bak.<timestamp>" backups. The
+# timestamps sort by name, oldest first.
+prune_backups() {
+  local file="$1" keep="$2"
+  local -a backups=()
+  mapfile -t backups < <(compgen -G "$file.bak.*" | sort)
+  ((${#backups[@]} > keep)) || return 0
+  rm -f -- "${backups[@]:0:${#backups[@]}-keep}"
+}
+
 sync_apps_json() {
   mkdir -p "$SUNSHINE_CONFIG_DIR"
 
@@ -550,25 +567,34 @@ sync_apps_json() {
     jq -e . >/dev/null 2>&1 <<<"$existing" || die "$SUNSHINE_APPS_JSON is not valid JSON; fix or remove it before syncing."
   fi
 
-  local -a entries=()
+  local -a entries=() appids=()
   local appid name image
-  for appid in "${!SELECTED[@]}"; do
+  # By appid, so the games keep the same order in Sunshine on every sync
+  # (associative arrays have no order of their own).
+  mapfile -t appids < <(printf '%s\n' "${!SELECTED[@]}" | sort -n)
+  for appid in "${appids[@]}"; do
+    [[ -n "$appid" ]] || continue
     name="${GAME_NAME[$appid]:-}"
     [[ -n "$name" ]] || continue
 
     image=""
     if [[ "$FETCH_COVER_ART" == "1" ]]; then
-      image="$(fetch_cover_art "$appid")" || warn "Could not prepare cover art for '$name' (appid $appid); syncing without image-path."
+      # A dry run downloads nothing, so only cached covers are found then;
+      # that's not worth a warning.
+      if ! image="$(fetch_cover_art "$appid")" && [[ "$DRY_RUN" != "1" ]]; then
+        warn "Could not prepare cover art for '$name' (appid $appid); syncing without image-path."
+      fi
     fi
 
     entries+=("$(jq -n \
       --arg name "$name" \
       --arg appid "$appid" \
+      --arg launch "$STEAM_LAUNCH_COMMAND" \
       --arg image "$image" \
       --arg stream_ws "$NIRI_STREAM_WORKSPACE" \
       --arg native_ws "$NIRI_NATIVE_WORKSPACE" \
       --argjson quit_steam "$([[ "$QUIT_STEAM_ON_STREAM_END" == "1" ]] && printf true || printf false)" \
-      '{name: $name, detached: ["setsid steam steam://rungameid/" + $appid]}
+      '{name: $name, detached: [$launch + " steam://rungameid/" + $appid]}
        + (if $image != "" then {"image-path": $image} else {} end)
        + {"prep-cmd": (
            [{
@@ -608,6 +634,7 @@ sync_apps_json() {
 
   if [[ -f "$SUNSHINE_APPS_JSON" ]]; then
     cp -p "$SUNSHINE_APPS_JSON" "$SUNSHINE_APPS_JSON.bak.$(date +%Y%m%d-%H%M%S)"
+    prune_backups "$SUNSHINE_APPS_JSON" "$APPS_JSON_BACKUPS_TO_KEEP"
   fi
 
   printf '%s\n' "$merged" | jq '.' > "$SUNSHINE_APPS_JSON.tmp"
@@ -619,26 +646,50 @@ sync_apps_json() {
     record_change "Every synced game will quit Steam when the stream ends."
   fi
 
-  # Cleans up *.jpg covers cached by older versions of this script, back
-  # when it wrote JPG straight through instead of converting to PNG.
-  if [[ -d "$SUNSHINE_COVERS_DIR" ]] && compgen -G "$SUNSHINE_COVERS_DIR/*.jpg" >/dev/null; then
-    rm -f "$SUNSHINE_COVERS_DIR"/*.jpg
+  # Cleans up <appid>.jpg covers cached by older versions of this script,
+  # back when it wrote JPG straight through instead of converting to PNG.
+  # Only those: other JPGs in the folder may be yours.
+  local jpg removed=0
+  if [[ -d "$SUNSHINE_COVERS_DIR" ]]; then
+    for jpg in "$SUNSHINE_COVERS_DIR"/*.jpg; do
+      [[ -f "$jpg" && "$(basename "$jpg")" =~ ^[0-9]+\.jpg$ ]] || continue
+      rm -f -- "$jpg"
+      removed=1
+    done
+  fi
+  if ((removed)); then
     record_change "Removed stale JPG cover-art files from $SUNSHINE_COVERS_DIR (superseded by PNG)."
   fi
+}
+
+# Sunshine's user service: app-dev.lizardbyte.app.Sunshine.service in current
+# packages (sunshine.service is only an alias of it), sunshine.service in
+# older ones.
+sunshine_unit() {
+  local unit
+  for unit in app-dev.lizardbyte.app.Sunshine.service sunshine.service; do
+    if systemctl --user cat "$unit" >/dev/null 2>&1; then
+      printf '%s' "$unit"
+      return 0
+    fi
+  done
+  return 1
 }
 
 maybe_restart_sunshine() {
   [[ "$DRY_RUN" == "1" ]] && return 0
   have_command systemctl || return 0
 
-  if systemctl --user is-active --quiet sunshine.service 2>/dev/null; then
-    if systemctl --user try-restart sunshine.service 2>/dev/null; then
-      record_change "Restarted the sunshine user service to pick up the new apps.json."
+  local unit
+  unit="$(sunshine_unit || true)"
+  if [[ -n "$unit" ]] && systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+    if systemctl --user try-restart "$unit" 2>/dev/null; then
+      record_change "Restarted the Sunshine user service ($unit) to pick up the new apps.json."
       return 0
     fi
-    warn "Could not restart the sunshine user service; restart it manually or hit Apply in the Sunshine web UI."
+    warn "Could not restart the Sunshine user service ($unit); restart it manually or hit Apply in the Sunshine web UI."
   else
-    warn "sunshine.service is not an active user service; open the Sunshine web UI (https://localhost:47990) and hit Apply, or start/restart Sunshine manually, to pick up the changes."
+    warn "Sunshine is not running as an active user service; open the Sunshine web UI (https://localhost:47990) and hit Apply, or start/restart Sunshine manually, to pick up the changes."
   fi
 }
 
@@ -678,6 +729,7 @@ main() {
   fi
 
   check_dependencies
+  resolve_steam_launch_command
   discover_installed_games
   load_selection
 

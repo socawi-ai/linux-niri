@@ -14,8 +14,10 @@ set -Eeuo pipefail
 # then set to 0 so the handoff from rEFInd into grub is instant and
 # invisible -- rEFInd is the only boot menu you actually see.
 #
-# Companion to fedora-niri-setup.sh in this repo, but fully standalone --
-# does not require it to have been run first.
+# Run by fedora-niri-setup.sh at the end of its setup (INSTALL_REFIND=1, the
+# default), but also standalone -- does not require it to have been run
+# first. fedora-niri-setup.sh leaves GRUB's timeout alone once this script
+# has set it up, so re-running that one doesn't bring GRUB's menu back.
 
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-$USER}}"
 ASSUME_YES="${ASSUME_YES:-1}"
@@ -26,12 +28,13 @@ ASSUME_YES="${ASSUME_YES:-1}"
 REFIND_VERSION="${REFIND_VERSION:-0.14.2}"
 REFIND_RPM_URL="${REFIND_RPM_URL:-https://sourceforge.net/projects/refind/files/${REFIND_VERSION}/refind-${REFIND_VERSION}-1.x86_64.rpm/download}"
 
-# Same theme repo arch-niri-setup.sh uses. Confirmed to ship icons/os_fedora.png.
+# Confirmed to ship icons/os_fedora.png.
 REFIND_THEME_REPO="${REFIND_THEME_REPO:-https://github.com/NilsPvR/rEFInd-nils}"
 REFIND_THEME_NAME="${REFIND_THEME_NAME:-rEFInd-nils}"
-REFIND_THEME_DIR="${REFIND_THEME_DIR:-$HOME/.cache/fedora-refind-setup/refind-theme}"
+# Checked before the default below is assigned: afterwards it's always set.
 REFIND_THEME_DIR_WAS_SET=0
 [[ -n "${REFIND_THEME_DIR+x}" ]] && REFIND_THEME_DIR_WAS_SET=1
+REFIND_THEME_DIR="${REFIND_THEME_DIR:-$HOME/.cache/fedora-refind-setup/refind-theme}"
 
 # Explicit override if find_refind_conf()/resolve_esp_mount() can't locate
 # things on their own (unusual ESP mount point or layout).
@@ -514,9 +517,13 @@ run_refind_install() {
   # shim-chained one (Secure-Boot-capable, what actually boots) and a
   # "(direct)" one that bypasses shim entirely -- that pair is expected, not
   # a duplicate. Prefer the shim-chained entry (its title has no "(direct)"
-  # suffix) for the rollback instructions printed in the summary.
-  REFIND_BOOT_NUM="$(grep -oE '^Boot[0-9A-Fa-f]{4}\*? rEFInd Boot Manager$' <<<"$after_entries" | head -1 | grep -oE '[0-9A-Fa-f]{4}' | head -1 || true)"
-  [[ -n "$REFIND_BOOT_NUM" ]] || REFIND_BOOT_NUM="$(grep -oE '^Boot[0-9A-Fa-f]{4}\*? rEFInd' <<<"$after_entries" | head -1 | grep -oE '[0-9A-Fa-f]{4}' | head -1 || true)"
+  # suffix) for the rollback instructions printed in the summary. With -v,
+  # efibootmgr prints each entry's device path after the title on the same
+  # line, so the title can't be matched up to the end of the line.
+  local rEFInd_lines
+  rEFInd_lines="$(grep -E '^Boot[0-9A-Fa-f]{4}\*? rEFInd' <<<"$after_entries" || true)"
+  REFIND_BOOT_NUM="$(grep -v '(direct)' <<<"$rEFInd_lines" | head -1 | grep -oE '^Boot[0-9A-Fa-f]{4}' | cut -c5-8 || true)"
+  [[ -n "$REFIND_BOOT_NUM" ]] || REFIND_BOOT_NUM="$(head -1 <<<"$rEFInd_lines" | grep -oE '^Boot[0-9A-Fa-f]{4}' | cut -c5-8 || true)"
 
   local refind_entry_count expected_entries=1
   [[ "$REFIND_USE_SHIM" == "1" ]] && expected_entries=2
@@ -601,11 +608,16 @@ configure_refind_boot_entry() {
 
   backup_system_path "$refind_conf"
 
+  # Copies everything except the previous generated block, and drops blank
+  # lines at the end (printed only once something follows them), so the
+  # blank line added before the block below doesn't pile up on every re-run.
   local tmp; tmp="$(mktemp)"
   run_sudo awk -v marker_begin="$marker_begin" -v marker_end="$marker_end" '
     $0 == marker_begin { skipping = 1; next }
     $0 == marker_end   { skipping = 0; next }
-    !skipping { print }
+    skipping { next }
+    /^[[:space:]]*$/ { blank++; next }
+    { while (blank > 0) { print ""; blank-- } print }
   ' "$refind_conf" >"$tmp"
 
   [[ ! -s "$tmp" ]] || printf '\n' >>"$tmp"

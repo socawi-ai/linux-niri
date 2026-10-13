@@ -48,6 +48,73 @@ INSTALL_LACT="${INSTALL_LACT:-1}"
 ENABLE_LACT_SERVICE="${ENABLE_LACT_SERVICE:-1}"
 CONFIGURE_PLYMOUTH="${CONFIGURE_PLYMOUTH:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
+
+# The repo's standalone scripts, run from the cloned config repo after the
+# desktop is set up (each also works on its own). A failure in one is
+# reported as a warning; the rest of the setup is already done by then.
+#   INSTALL_REFIND   -- fedora-refind-setup.sh: themed rEFInd boot menu, and
+#                       GRUB set to hand off instantly (see GRUB below).
+#   INSTALL_LSFG_VK  -- install-lsfg-vk.sh: builds lsfg-vk from source
+#                       (needs Lossless Scaling on Steam to be useful).
+#   INSTALL_SUNSHINE -- install-sunshine.sh: Sunshine streaming host, set to
+#                       start on login.
+#   INSTALL_STEAM_SUNSHINE_SYNC -- steam-sunshine-sync.sh: opens its game
+#                       picker to add installed Steam games to Sunshine.
+#                       Skipped (with a note) when there's no terminal, or no
+#                       games yet, as right after a fresh install.
+INSTALL_REFIND="${INSTALL_REFIND:-1}"
+INSTALL_LSFG_VK="${INSTALL_LSFG_VK:-1}"
+INSTALL_SUNSHINE="${INSTALL_SUNSHINE:-1}"
+INSTALL_STEAM_SUNSHINE_SYNC="${INSTALL_STEAM_SUNSHINE_SYNC:-1}"
+
+# The setup menu: a checklist of the optional features below (pre-checked
+# from the INSTALL_*/... values above, so environment variables still set
+# the defaults), shown when there's a terminal. SETUP_MENU=0 or --no-menu
+# skips it and uses those values as they are, e.g. for unattended runs.
+SETUP_MENU="${SETUP_MENU:-1}"
+
+# "tag|variable|label" -- the menu's optional features, in menu order. The
+# core (Niri, Noctalia, base packages, this repo's configs) is always set up.
+SETUP_FEATURES=(
+  "steam|INSTALL_STEAM|Steam (RPM Fusion)"
+  "gamescope|INSTALL_GAMESCOPE|gamescope (Valve's game compositor)"
+  "lact|INSTALL_LACT|LACT (GPU control, lactd service)"
+  "vscode|INSTALL_VSCODE|Visual Studio Code"
+  "flatpak|INSTALL_FLATPAK|Flatpak + Flathub"
+  "protonmail|INSTALL_PROTON_MAIL|Proton Mail (Flatpak)"
+  "localsend|INSTALL_LOCALSEND|LocalSend (Flatpak)"
+  "protonupqt|INSTALL_PROTONUP_QT|ProtonUp-Qt (Flatpak)"
+  "cursors|INSTALL_MCMOJAVE_CURSORS|McMojave cursors"
+  "nautilusterm|INSTALL_NAUTILUS_OPEN_ANY_TERMINAL|Nautilus: Open in Alacritty"
+  "greeter|ENABLE_GREETD|Login screen (greetd + Noctalia Greeter)"
+  "plymouth|CONFIGURE_PLYMOUTH|Boot splash and GRUB look (Plymouth)"
+  "watchdog|DISABLE_HARDWARE_WATCHDOG|Silence the watchdog shutdown warning"
+  "refind|INSTALL_REFIND|rEFInd boot menu (themed)"
+  "lsfg|INSTALL_LSFG_VK|lsfg-vk frame generation (build from source)"
+  "sunshine|INSTALL_SUNSHINE|Sunshine streaming host"
+  "steamsync|INSTALL_STEAM_SUNSHINE_SYNC|Add Steam games to Sunshine (game picker)"
+)
+
+# The same whiptail theme as steam-sunshine-sync.sh: white dialog, black
+# text, green buttons, red for whatever has focus -- readable in any
+# terminal palette. Left alone if NEWT_COLORS is already set.
+NEWT_COLORS="${NEWT_COLORS:-root=,black
+window=black,white
+border=black,white
+title=black,white
+label=black,white
+listbox=black,white
+actlistbox=white,red
+checkbox=black,white
+actcheckbox=white,red
+button=black,green
+actbutton=white,red
+entry=black,white
+textbox=black,white
+acttextbox=white,red
+helpline=white,black
+roottext=white,black}"
+export NEWT_COLORS
 NOCTALIA_COPR="${NOCTALIA_COPR:-lionheartp/Hyprland}"
 NOCTALIA_PACKAGE="${NOCTALIA_PACKAGE:-noctalia-git}"
 NOCTALIA_GREETER_PACKAGE="${NOCTALIA_GREETER_PACKAGE:-noctalia-greeter}"
@@ -111,7 +178,6 @@ if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   COLOR_RESET=$'\033[0m'
   COLOR_BOLD=$'\033[1m'
   COLOR_BLUE=$'\033[1;34m'
-  COLOR_CYAN=$'\033[1;36m'
   COLOR_GREEN=$'\033[1;32m'
   COLOR_YELLOW=$'\033[1;33m'
   COLOR_RED=$'\033[1;31m'
@@ -120,21 +186,18 @@ else
   COLOR_RESET=""
   COLOR_BOLD=""
   COLOR_BLUE=""
-  COLOR_CYAN=""
   COLOR_GREEN=""
   COLOR_YELLOW=""
   COLOR_RED=""
   COLOR_DIM=""
 fi
 
-TOTAL_SECTIONS=9
+TOTAL_SECTIONS=10
 
 declare -a CHANGES=()
 declare -a WARNINGS=()
 declare -a USER_BACKUPS=()
 declare -a SYSTEM_BACKUPS=()
-
-exec > >(tee -a "$LOG_FILE") 2>&1
 
 trap 'die "Setup failed on or near line $LINENO. Review $LOG_FILE, fix the reported problem, then re-run the script."' ERR
 
@@ -287,6 +350,141 @@ resolve_target_user() {
   log "Target home: $TARGET_HOME"
   log "Config repo: $CONFIG_REPO_URL"
   log "Config source: $CONFIG_SOURCE_DIR"
+}
+
+usage() {
+  cat <<EOF
+Usage: fedora-niri-setup.sh [options]
+
+Sets up a Niri desktop on Fedora. Opens a menu to choose the optional
+features first when run from a terminal.
+
+Options:
+  --no-menu     Skip the menu; use the defaults and INSTALL_*/... environment
+                variables as they are (same as SETUP_MENU=0)
+  -h, --help    Show this help and exit
+
+See the top of the script for all environment variables.
+EOF
+}
+
+# Everything from here on also goes to the log file. Started after the
+# options are read, so --help doesn't leave a log behind.
+start_logging() {
+  exec > >(tee -a "$LOG_FILE") 2>&1
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-menu) SETUP_MENU=0 ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "Unknown argument: $1 (see --help)." ;;
+    esac
+    shift
+  done
+}
+
+# Whether /dev/tty can be opened: the menu draws there directly, since this
+# script's own output is piped into the log.
+have_terminal() {
+  { : </dev/tty >/dev/tty; } 2>/dev/null
+}
+
+# Runs whiptail on the terminal; its answer (what it prints on stderr) is
+# printed on stdout. Fails when the user cancels or presses Esc.
+whiptail_tty() {
+  local answer status=0
+  answer="$(mktemp)"
+  whiptail "$@" 2>"$answer" >/dev/tty </dev/tty || status=$?
+  cat "$answer"
+  rm -f "$answer"
+  return "$status"
+}
+
+# The setup menu: a checklist of SETUP_FEATURES, then a confirmation. Sets
+# each feature's variable to 1 or 0. Cancelling exits before anything has
+# been changed.
+choose_features() {
+  if [[ "$SETUP_MENU" != "1" ]]; then
+    log "Setup menu skipped; using the defaults and environment variables."
+    return 0
+  fi
+  if ! have_terminal; then
+    log "No terminal for the setup menu; using the defaults and environment variables."
+    return 0
+  fi
+  if ! have_command whiptail; then
+    log "Installing whiptail (newt) for the setup menu."
+    run_sudo "$DNF_BIN" install -y newt || true
+  fi
+  if ! have_command whiptail; then
+    warn "whiptail is not available; skipping the setup menu and using the defaults and environment variables."
+    return 0
+  fi
+
+  local entry tag var label selection chosen skipped
+  local -a items=()
+
+  # Sized to the terminal (whiptail can't draw a box taller or wider than
+  # it): the checklist scrolls when the features don't all fit.
+  local rows=24 cols=80 size
+  size="$(stty size </dev/tty 2>/dev/null || true)"
+  # Some consoles report 0 0; keep the 24x80 fallback then.
+  if [[ "$size" =~ ^([0-9]+)\ ([0-9]+)$ ]] && ((BASH_REMATCH[1] >= 15 && BASH_REMATCH[2] >= 50)); then
+    rows="${BASH_REMATCH[1]}"
+    cols="${BASH_REMATCH[2]}"
+  fi
+  local width=$((cols - 4 < 78 ? cols - 4 : 78))
+  local height=$((rows - 2 < ${#SETUP_FEATURES[@]} + 9 ? rows - 2 : ${#SETUP_FEATURES[@]} + 9))
+  local list_height=$((height - 9 < 4 ? 4 : height - 9))
+
+  while true; do
+    items=()
+    for entry in "${SETUP_FEATURES[@]}"; do
+      IFS='|' read -r tag var label <<<"$entry"
+      items+=("$tag" "$label" "$([[ "${!var}" == "1" ]] && printf on || printf off)")
+    done
+
+    if ! selection="$(whiptail_tty --title "Fedora Niri Setup" --separate-output \
+        --ok-button "Next" --cancel-button "Quit" --checklist \
+        "Niri, Noctalia, the base packages and this repo's configs are always set up. Choose the rest (Space toggles, Enter continues):" \
+        "$height" "$width" "$list_height" "${items[@]}")"; then
+      log "Setup cancelled from the menu; nothing was changed."
+      exit 0
+    fi
+
+    chosen=""
+    skipped=""
+    for entry in "${SETUP_FEATURES[@]}"; do
+      IFS='|' read -r tag var label <<<"$entry"
+      if grep -qxF -- "$tag" <<<"$selection"; then
+        printf -v "$var" '%s' 1
+        chosen+="${chosen:+, }$label"
+      else
+        printf -v "$var" '%s' 0
+        skipped+="${skipped:+, }$label"
+      fi
+    done
+
+    # Comma-separated, so it fits without scrolling: with --scrolltext the
+    # focus starts on the text, and Enter wouldn't press "Install".
+    if whiptail_tty --title "Fedora Niri Setup" --yes-button "Install" --no-button "Back" --yesno \
+        "Always: Niri, Noctalia, base packages, this repo's configs.
+
+Install: ${chosen:-nothing optional}.
+
+Skip: ${skipped:-nothing}." "$height" "$width" >/dev/null; then
+      break
+    fi
+  done
+
+  local summary=""
+  for entry in "${SETUP_FEATURES[@]}"; do
+    IFS='|' read -r tag var label <<<"$entry"
+    [[ "${!var}" == "1" ]] && summary+="${summary:+, }$tag"
+  done
+  log "Chosen in the setup menu: ${summary:-only the core}."
 }
 
 prepare_runtime() {
@@ -740,8 +938,6 @@ install_steam() {
   if dnf_install_optional steam; then
     record_change "Installed Steam from RPM Fusion."
   fi
-
-  install_gamescope
 }
 
 install_gamescope() {
@@ -835,13 +1031,33 @@ configure_plymouth_and_grub() {
     warn "grubby was not found; kernel arguments were not updated."
   fi
 
-  upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
-  upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
+  # With rEFInd as the boot menu, fedora-refind-setup.sh sets GRUB to hand
+  # off instantly (timeout 0, hidden). Setting a visible GRUB menu here would
+  # undo that and show two menus, so it's left alone then.
+  if [[ "$INSTALL_REFIND" == "1" ]] || refind_setup_installed; then
+    log "rEFInd is the boot menu; leaving GRUB's timeout to fedora-refind-setup.sh."
+  else
+    upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
+    upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
+    record_change "Configured GRUB timeout to $GRUB_TIMEOUT_SECONDS seconds."
+  fi
   upsert_grub_default GRUB_GFXMODE "\"$GRUB_GFXMODE\""
   upsert_grub_default GRUB_TERMINAL_OUTPUT "\"gfxterm\""
 
   regenerate_grub_config
-  record_change "Configured GRUB timeout to $GRUB_TIMEOUT_SECONDS seconds."
+}
+
+# Whether fedora-refind-setup.sh has configured rEFInd on this machine: its
+# generated block is in a refind.conf on the EFI System Partition.
+refind_setup_installed() {
+  local esp conf
+  for esp in /boot/efi /efi; do
+    while IFS= read -r conf; do
+      [[ -n "$conf" ]] || continue
+      run_sudo grep -qs '^# BEGIN fedora-refind-setup generated boot configuration$' "$conf" && return 0
+    done < <(run_sudo find "$esp" -maxdepth 4 -iname refind.conf 2>/dev/null || true)
+  done
+  return 1
 }
 
 disable_hardware_watchdog() {
@@ -902,12 +1118,6 @@ clone_or_update_git_repo() {
   local repo_dir="$2"
   local branch="${3:-}"
 
-  # Registers git-lfs's smudge/clean filters for $TARGET_USER so any
-  # LFS-tracked files (e.g. this repo's wallpapers/) are actually downloaded
-  # on clone/checkout instead of left as pointer stubs. Idempotent, and a
-  # harmless no-op for repos that don't use LFS at all.
-  have_command git-lfs && run_as_user git lfs install
-
   run_as_user mkdir -p "$(dirname "$repo_dir")"
 
   if [[ -d "$repo_dir/.git" ]]; then
@@ -949,11 +1159,6 @@ clone_or_update_git_repo() {
       run_as_user git clone "$repo_url" "$repo_dir"
     fi
   fi
-
-  # Belt-and-suspenders: the smudge filter registered above should already
-  # materialize LFS content during the clone/checkout/reset above, but an
-  # explicit pull removes any doubt. No-op for repos with no LFS tracking.
-  have_command git-lfs && run_as_user git -C "$repo_dir" lfs pull
 }
 
 install_mcmojave_cursors() {
@@ -1040,6 +1245,7 @@ install_lact() {
 install_default_apps() {
   install_vscode
   install_steam
+  install_gamescope
   install_mcmojave_cursors
   install_nautilus_open_any_terminal
   install_lact
@@ -1060,6 +1266,15 @@ enable_noctalia_copr() {
 
 install_noctalia_packages() {
   enable_noctalia_copr
+
+  # The greeter is only needed for the login screen (ENABLE_GREETD).
+  if [[ "$ENABLE_GREETD" != "1" ]]; then
+    log "Installing Noctalia v5 (login screen disabled, so not Noctalia Greeter)."
+    dnf_install "$NOCTALIA_PACKAGE"
+    have_command noctalia || die "Noctalia package installation finished, but 'noctalia' was not found in PATH."
+    record_change "Installed Noctalia v5."
+    return 0
+  fi
 
   log "Installing Noctalia v5 and Noctalia Greeter."
   dnf_install "$NOCTALIA_PACKAGE" "$NOCTALIA_GREETER_PACKAGE"
@@ -1206,17 +1421,16 @@ configure_noctalia_settings() {
   [[ -f "$config_file" ]] || run_as_user touch "$config_file"
   backup_user_path "$config_file"
 
+  # Copies everything except the previous generated block, and drops blank
+  # lines at the end (printed only once something follows them), so the
+  # blank line added before the block below doesn't pile up on every re-run.
   tmp="$(mktemp)"
   awk -v marker_begin="$marker_begin" -v marker_end="$marker_end" '
-    $0 == marker_begin {
-      skipping = 1
-      next
-    }
-    $0 == marker_end {
-      skipping = 0
-      next
-    }
-    !skipping { print }
+    $0 == marker_begin { skipping = 1; next }
+    $0 == marker_end { skipping = 0; next }
+    skipping { next }
+    /^[[:space:]]*$/ { blank++; next }
+    { while (blank > 0) { print ""; blank-- } print }
   ' "$config_file" >"$tmp"
 
   [[ ! -s "$tmp" ]] || printf '\n' >>"$tmp"
@@ -1458,6 +1672,85 @@ EOF
   record_change "Configured greetd to launch Noctalia Greeter with Niri as the default session."
 }
 
+# Runs one of this repo's standalone scripts from the config source. They
+# ask for sudo themselves and print their own summary; a failure is only a
+# warning here.
+run_repo_script() {
+  local script="$1"
+  local label="$2"
+  shift 2
+  local path="$CONFIG_SOURCE_DIR/$script"
+
+  if [[ ! -f "$path" ]]; then
+    warn "$script was not found in $CONFIG_SOURCE_DIR; skipping $label."
+    return 0
+  fi
+
+  log "Running $script ($label)."
+  if "$@" bash "$path"; then
+    record_change "Ran $script ($label)."
+  else
+    warn "$script failed; see its output above. Re-run it on its own once the problem is fixed: bash $path"
+  fi
+}
+
+install_extras() {
+  if [[ "$INSTALL_REFIND" == "1" ]]; then
+    run_repo_script fedora-refind-setup.sh "rEFInd boot menu" \
+      env ASSUME_YES="$ASSUME_YES" TARGET_USER="$TARGET_USER"
+  else
+    log "rEFInd setup is disabled."
+  fi
+
+  if [[ "$INSTALL_LSFG_VK" == "1" ]]; then
+    run_repo_script install-lsfg-vk.sh "lsfg-vk frame generation" env
+  else
+    log "lsfg-vk installation is disabled."
+  fi
+
+  # Sunshine's config and autostart belong to the target user.
+  if [[ "$INSTALL_SUNSHINE" == "1" ]]; then
+    run_repo_script install-sunshine.sh "Sunshine streaming host" run_as_user env
+  else
+    log "Sunshine installation is disabled."
+  fi
+
+  if [[ "$INSTALL_STEAM_SUNSHINE_SYNC" == "1" ]]; then
+    sync_steam_games_into_sunshine
+  else
+    log "Steam -> Sunshine game sync is disabled."
+  fi
+}
+
+# Opens steam-sunshine-sync.sh's game picker (pre-checked with the current
+# selection) and syncs the chosen games into the target user's Sunshine
+# apps. The picker draws on the terminal, which this script's output (piped
+# into the log) isn't -- so it talks to /dev/tty directly, and its screens
+# aren't in the log.
+sync_steam_games_into_sunshine() {
+  if ! have_command sunshine; then
+    log "Sunshine is not installed; skipping the Steam -> Sunshine game sync."
+    return 0
+  fi
+  if ! { : </dev/tty >/dev/tty; } 2>/dev/null; then
+    warn "No terminal for the Steam game picker; run steam-sunshine-sync.sh yourself later to add games to Sunshine."
+    return 0
+  fi
+
+  local path="$CONFIG_SOURCE_DIR/steam-sunshine-sync.sh"
+  if [[ ! -f "$path" ]]; then
+    warn "steam-sunshine-sync.sh was not found in $CONFIG_SOURCE_DIR; skipping the Steam -> Sunshine game sync."
+    return 0
+  fi
+
+  log "Opening the Steam -> Sunshine game picker (on the terminal; not included in the log)."
+  if run_as_user env bash "$path" --select --skip-if-no-games </dev/tty >/dev/tty 2>/dev/tty; then
+    record_change "Ran steam-sunshine-sync.sh (Steam games in Sunshine)."
+  else
+    warn "steam-sunshine-sync.sh failed; see its output above. Re-run it on its own once the problem is fixed: bash $path --select"
+  fi
+}
+
 print_summary() {
   local item
 
@@ -1487,10 +1780,13 @@ print_summary() {
 }
 
 main() {
+  parse_args "$@"
+  start_logging
   print_banner
   section "Fedora Niri setup"
   require_fedora
   resolve_target_user
+  choose_features
   prepare_runtime
 
   section "Base packages"
@@ -1521,6 +1817,9 @@ main() {
 
   section "Greeter"
   configure_noctalia_greeter
+
+  section "Boot menu, frame generation and streaming"
+  install_extras
 
   section "Summary"
   print_summary

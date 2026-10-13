@@ -1,29 +1,23 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Installs Sunshine (LizardByte's self-hosted Moonlight streaming host)
-# from each distro's stable channel, and enables it to start on login.
+# Installs Sunshine (LizardByte's self-hosted Moonlight streaming host) on
+# Fedora from LizardByte's own COPR (stable channel), and enables it to
+# start on login.
 #
-# Fully standalone -- run this by itself, once, on a machine that already
-# has its desktop set up. Not called by fedora-niri-setup.sh or
-# arch-niri-setup.sh, and does not require either to have been run first.
+# Run by fedora-niri-setup.sh at the end of its setup (INSTALL_SUNSHINE=1,
+# the default), but also standalone: run it by itself on a machine that
+# already has its desktop set up. Safe to re-run.
 #
 # Installs the native package rather than the Flatpak build: Flatpak's
 # Sunshine sandbox does not support KMS screen capture, which this repo's
 # bare-Wayland/niri sessions need for streaming to actually work.
-#   Fedora: LizardByte's own COPR, stable channel.
-#   Arch:   the AUR's stable package (sunshine), via an AUR helper
-#           (paru by default, set AUR_HELPER=yay to use that instead) --
-#           bootstrapped from the AUR itself if not already installed.
 #
 # Also sets sunshine.conf's capture output (output_name) to DP-2 by default
 # -- override with SUNSHINE_CAPTURE_OUTPUT if that's not the right connector
 # on this machine (find names with: niri msg outputs).
 
 SUNSHINE_COPR="${SUNSHINE_COPR:-lizardbyte/stable}"
-SUNSHINE_AUR_PACKAGE="${SUNSHINE_AUR_PACKAGE:-sunshine}"
-AUR_HELPER="${AUR_HELPER:-paru}"
-ASSUME_YES="${ASSUME_YES:-1}"
 ENABLE_SUNSHINE_AUTOSTART="${ENABLE_SUNSHINE_AUTOSTART:-1}"
 SUNSHINE_CAPTURE_OUTPUT="${SUNSHINE_CAPTURE_OUTPUT:-DP-2}"
 SUNSHINE_CONFIG_DIR="${SUNSHINE_CONFIG_DIR:-$HOME/.config/sunshine}"
@@ -68,23 +62,13 @@ have_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
-detect_distro() {
+require_fedora() {
   [[ -f /etc/os-release ]] || die "Cannot detect distro: /etc/os-release not found."
-
-  local id id_like
-  id="$(grep -oP '^ID=\K.*' /etc/os-release 2>/dev/null | tr -d '"')"
-  id_like="$(grep -oP '^ID_LIKE=\K.*' /etc/os-release 2>/dev/null | tr -d '"')"
-
-  case "$id $id_like" in
-    *fedora*) printf 'fedora' ;;
-    *arch*) printf 'arch' ;;
-    *) die "Unsupported distro (ID=$id ID_LIKE=$id_like). This script supports Fedora and Arch only." ;;
-  esac
+  grep -qi '^ID=fedora' /etc/os-release || die "This script only supports Fedora."
+  have_command dnf || die "dnf was not found."
 }
 
-install_sunshine_fedora() {
-  have_command dnf || die "dnf was not found."
-
+install_sunshine() {
   sudo dnf install -y dnf-plugins-core || warn "Could not ensure dnf-plugins-core is installed; 'dnf copr' may not work."
 
   log "Enabling LizardByte COPR ($SUNSHINE_COPR)."
@@ -96,34 +80,14 @@ install_sunshine_fedora() {
   record_change "Installed Sunshine from COPR $SUNSHINE_COPR."
 }
 
-ensure_aur_helper() {
-  have_command "$AUR_HELPER" && return 0
-
-  log "$AUR_HELPER was not found; bootstrapping it from the AUR."
-  have_command sudo || die "sudo was not found; cannot bootstrap $AUR_HELPER."
-  have_command pacman || die "pacman was not found; cannot bootstrap $AUR_HELPER."
-  have_command git || sudo pacman -S --needed --noconfirm git || die "Could not install git (required to bootstrap $AUR_HELPER)."
-  sudo pacman -S --needed --noconfirm base-devel || die "Could not install base-devel (required to build $AUR_HELPER)."
-
-  local build_dir
-  build_dir="$(mktemp -d)"
-  git clone "https://aur.archlinux.org/${AUR_HELPER}.git" "$build_dir" || die "Could not clone $AUR_HELPER from the AUR."
-
-  (cd "$build_dir" && makepkg -si --noconfirm --needed) || die "Could not build/install $AUR_HELPER. Check the output above."
-  rm -rf "$build_dir"
-
-  have_command "$AUR_HELPER" || die "$AUR_HELPER installation finished, but it was not found in PATH."
-  record_change "Bootstrapped the $AUR_HELPER AUR helper."
-}
-
-install_sunshine_arch() {
-  ensure_aur_helper
-
-  log "Installing $SUNSHINE_AUR_PACKAGE from the AUR via $AUR_HELPER (source build -- this can take a while)."
-  local args=(-S --needed)
-  [[ "$ASSUME_YES" == "1" ]] && args+=(--noconfirm)
-  "$AUR_HELPER" "${args[@]}" "$SUNSHINE_AUR_PACKAGE" || die "Could not install $SUNSHINE_AUR_PACKAGE."
-  record_change "Installed $SUNSHINE_AUR_PACKAGE from the AUR."
+# Deletes all but the newest $2 "$1.bak.<timestamp>" backups. The
+# timestamps sort by name, oldest first.
+prune_backups() {
+  local file="$1" keep="$2"
+  local -a backups=()
+  mapfile -t backups < <(compgen -G "$file.bak.*" | sort)
+  ((${#backups[@]} > keep)) || return 0
+  rm -f -- "${backups[@]:0:${#backups[@]}-keep}"
 }
 
 configure_capture_output() {
@@ -135,11 +99,28 @@ configure_capture_output() {
       return 0
     fi
     cp -p "$SUNSHINE_CONFIG_FILE" "$SUNSHINE_CONFIG_FILE.bak.$(date +%Y%m%d-%H%M%S)"
+    prune_backups "$SUNSHINE_CONFIG_FILE" 5
     sed -i "s/^output_name.*/output_name = $SUNSHINE_CAPTURE_OUTPUT/" "$SUNSHINE_CONFIG_FILE"
   else
     printf 'output_name = %s\n' "$SUNSHINE_CAPTURE_OUTPUT" >> "$SUNSHINE_CONFIG_FILE"
   fi
   record_change "Set capture output (output_name) to $SUNSHINE_CAPTURE_OUTPUT in $SUNSHINE_CONFIG_FILE."
+}
+
+# Sunshine's user service as installed: app-dev.lizardbyte.app.Sunshine in
+# current packages, sunshine in older ones. systemd won't enable a unit by
+# an alias name, and current packages only keep "sunshine" as an alias.
+sunshine_unit() {
+  local unit dir
+  for unit in app-dev.lizardbyte.app.Sunshine.service sunshine.service; do
+    for dir in /usr/lib/systemd/user /usr/local/lib/systemd/user /etc/systemd/user; do
+      if [[ -f "$dir/$unit" && ! -L "$dir/$unit" ]]; then
+        printf '%s' "$unit"
+        return 0
+      fi
+    done
+  done
+  return 1
 }
 
 configure_autostart() {
@@ -153,20 +134,27 @@ configure_autostart() {
     return 0
   }
 
+  local unit
+  unit="$(sunshine_unit || true)"
+  [[ -n "$unit" ]] || {
+    warn "Could not find Sunshine's systemd user service; autostart was not set up."
+    return 0
+  }
+
   local uid
   uid="$(id -u)"
   if [[ -d "/run/user/$uid" ]]; then
-    if systemctl --user enable --now sunshine; then
-      record_change "Enabled and started the sunshine user service."
+    if systemctl --user enable --now "$unit"; then
+      record_change "Enabled and started the Sunshine user service ($unit)."
       return 0
     fi
-    warn "Could not enable/start the sunshine user service now."
+    warn "Could not enable/start the Sunshine user service ($unit) now."
   else
-    if systemctl --user enable sunshine; then
-      warn "Enabled the sunshine user service for autostart, but could not start it now because /run/user/$uid does not exist (no active login session)."
+    if systemctl --user enable "$unit"; then
+      warn "Enabled the Sunshine user service ($unit) for autostart, but could not start it now because /run/user/$uid does not exist (no active login session)."
       return 0
     fi
-    warn "Could not enable the sunshine user service."
+    warn "Could not enable the Sunshine user service ($unit)."
   fi
 }
 
@@ -201,15 +189,8 @@ print_summary() {
 }
 
 main() {
-  local distro
-  distro="$(detect_distro)"
-  log "Detected distro: $distro."
-
-  case "$distro" in
-    fedora) install_sunshine_fedora ;;
-    arch) install_sunshine_arch ;;
-  esac
-
+  require_fedora
+  install_sunshine
   configure_capture_output
   configure_autostart
   print_summary
