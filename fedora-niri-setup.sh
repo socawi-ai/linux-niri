@@ -49,23 +49,93 @@ ENABLE_LACT_SERVICE="${ENABLE_LACT_SERVICE:-1}"
 CONFIGURE_PLYMOUTH="${CONFIGURE_PLYMOUTH:-1}"
 DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}"
 
-# The repo's standalone scripts, run from the cloned config repo after the
-# desktop is set up (each also works on its own). A failure in one is
-# reported as a warning; the rest of the setup is already done by then.
-#   INSTALL_REFIND   -- fedora-refind-setup.sh: themed rEFInd boot menu, and
-#                       GRUB set to hand off instantly (see GRUB below).
-#   INSTALL_LSFG_VK  -- install-lsfg-vk.sh: builds lsfg-vk from source
-#                       (needs Lossless Scaling on Steam to be useful).
-#   INSTALL_SUNSHINE -- install-sunshine.sh: Sunshine streaming host, set to
-#                       start on login.
-#   INSTALL_STEAM_SUNSHINE_SYNC -- steam-sunshine-sync.sh: opens its game
-#                       picker to add installed Steam games to Sunshine.
-#                       Skipped (with a note) when there's no terminal, or no
-#                       games yet, as right after a fresh install.
+# Set up last, after the desktop. A failure in one of these is reported as a
+# warning and the rest still run; re-run the script once it's fixed.
+#   INSTALL_REFIND   -- themed rEFInd boot menu, with GRUB set to hand off
+#                       instantly (see rEFInd below). UEFI only.
+#   INSTALL_LSFG_VK  -- builds lsfg-vk from source (needs Lossless Scaling on
+#                       Steam to be useful).
+#   INSTALL_SUNSHINE -- Sunshine streaming host, set to start on login.
+#
+# steam-sunshine-sync.sh is not run from here: it needs Steam logged in and
+# games installed first. Run it on its own afterwards (the summary says so).
 INSTALL_REFIND="${INSTALL_REFIND:-1}"
 INSTALL_LSFG_VK="${INSTALL_LSFG_VK:-1}"
 INSTALL_SUNSHINE="${INSTALL_SUNSHINE:-1}"
-INSTALL_STEAM_SUNSHINE_SYNC="${INSTALL_STEAM_SUNSHINE_SYNC:-1}"
+
+# rEFInd is installed as an ADDITIONAL firmware boot entry alongside Fedora's
+# own "Fedora" entry (nothing existing is removed, so the firmware boot menu
+# can always fall back to it), themed with rEFInd-nils, with one manual menu
+# entry that chainloads Fedora's shim -> grub -> BLS chain. GRUB's own menu
+# is then hidden with timeout 0, so rEFInd is the only boot menu you see.
+#
+# rEFInd has no Fedora/COPR package; upstream ships version-pinned RPMs on
+# SourceForge with no "latest" alias, so the version is pinned here.
+REFIND_VERSION="${REFIND_VERSION:-0.14.2}"
+REFIND_RPM_URL="${REFIND_RPM_URL:-https://sourceforge.net/projects/refind/files/${REFIND_VERSION}/refind-${REFIND_VERSION}-1.x86_64.rpm/download}"
+# Confirmed to ship icons/os_fedora.png.
+REFIND_THEME_REPO="${REFIND_THEME_REPO:-https://github.com/NilsPvR/rEFInd-nils}"
+REFIND_THEME_NAME="${REFIND_THEME_NAME:-rEFInd-nils}"
+# Defaults under the target user's home, set in resolve_target_user.
+REFIND_THEME_DIR="${REFIND_THEME_DIR:-}"
+# Explicit overrides if refind.conf or the ESP can't be found automatically.
+REFIND_CONF_PATH="${REFIND_CONF_PATH:-}"
+ESP_MOUNT_OVERRIDE="${ESP_MOUNT_OVERRIDE:-}"
+# The shim Fedora's own firmware entry boots (\EFI\FEDORA\SHIMX64.EFI on a
+# stock install), relative to the ESP root; rEFInd's menu entry chainloads it.
+REFIND_SHIM_LOADER_PATH="${REFIND_SHIM_LOADER_PATH:-/EFI/fedora/shimx64.efi}"
+# --shim and --localkeys make the install ready for Secure Boot: if it's
+# turned on later, nothing needs redoing, but rEFInd's key must be approved
+# once in the blue MokManager screen at the next boot (physical presence
+# only; that can't be scripted). Harmless while Secure Boot is off.
+REFIND_USE_SHIM="${REFIND_USE_SHIM:-1}"
+REFIND_USE_LOCALKEYS="${REFIND_USE_LOCALKEYS:-1}"
+REFIND_MENUENTRY_LABEL="${REFIND_MENUENTRY_LABEL:-Fedora}"
+REFIND_MENUENTRY_ICON="${REFIND_MENUENTRY_ICON:-themes/$REFIND_THEME_NAME/icons/os_fedora.png}"
+# "internal" lets rEFInd find other OSes (e.g. Windows) on internal disks;
+# "external,optical" keeps USB installers/rescue disks visible.
+REFIND_SCANFOR="${REFIND_SCANFOR:-manual,internal,external,optical}"
+# Skipped by that scan: Fedora's own EFI directory (else a duplicate of the
+# manual "Fedora" entry) and EFI/BOOT (the generic fallback loader). Set to
+# "" to scan everything.
+REFIND_DONT_SCAN_DIRS="${REFIND_DONT_SCAN_DIRS:-EFI/fedora,EFI/BOOT}"
+# Off: the manual entry already boots grub, which picks the kernel; on, rEFInd
+# adds one "Boot vmlinuz-..." entry per installed kernel.
+REFIND_SCAN_ALL_LINUX_KERNELS="${REFIND_SCAN_ALL_LINUX_KERNELS:-false}"
+REFIND_TIMEOUT_SECONDS="${REFIND_TIMEOUT_SECONDS:-10}"
+# Without an explicit resolution rEFInd often picks a mode that doesn't match
+# the display, and the theme renders distorted. Matches GRUB_GFXMODE's first
+# mode below; set either to "" for rEFInd's own auto-detect.
+REFIND_RESOLUTION_WIDTH="${REFIND_RESOLUTION_WIDTH:-3440}"
+REFIND_RESOLUTION_HEIGHT="${REFIND_RESOLUTION_HEIGHT:-1440}"
+# GRUB once rEFInd hands off to it. "hidden" avoids a menu flash; GRUB's menu
+# is still reachable by holding Shift/Esc during boot.
+GRUB_TIMEOUT_TARGET="${GRUB_TIMEOUT_TARGET:-0}"
+GRUB_TIMEOUT_STYLE_TARGET="${GRUB_TIMEOUT_STYLE_TARGET:-hidden}"
+
+# lsfg-vk (https://lsfg-vk.dev): a Vulkan layer running Lossless Scaling's
+# frame generation, built per the official "Building from Source" guide for
+# Fedora. Re-running updates and rebuilds it.
+LSFG_VK_REPO_URL="${LSFG_VK_REPO_URL:-https://git.lsfg-vk.dev/lsfg-vk.git}"
+# Empty = the latest default branch.
+LSFG_VK_REPO_TAG="${LSFG_VK_REPO_TAG:-}"
+# Defaults under the target user's home, set in resolve_target_user.
+LSFG_VK_BUILD_DIR="${LSFG_VK_BUILD_DIR:-}"
+LSFG_VK_INSTALL_PREFIX="${LSFG_VK_INSTALL_PREFIX:-/usr/local}"
+LSFG_VK_BUILD_TYPE="${LSFG_VK_BUILD_TYPE:-Release}"
+LSFG_VK_ENABLE_LTO="${LSFG_VK_ENABLE_LTO:-1}"
+LSFG_VK_BUILD_UI="${LSFG_VK_BUILD_UI:-1}"
+# vulkan-tools ships vkcube, to check the layer loads.
+INSTALL_VULKAN_TOOLS="${INSTALL_VULKAN_TOOLS:-1}"
+
+# Sunshine from LizardByte's COPR. The native package, not the Flatpak:
+# Flatpak's sandbox can't do the KMS capture a bare niri session needs.
+SUNSHINE_COPR="${SUNSHINE_COPR:-lizardbyte/stable}"
+ENABLE_SUNSHINE_AUTOSTART="${ENABLE_SUNSHINE_AUTOSTART:-1}"
+# The connector Sunshine streams (find names with: niri msg outputs).
+SUNSHINE_CAPTURE_OUTPUT="${SUNSHINE_CAPTURE_OUTPUT:-DP-2}"
+# Defaults under the target user's home, set in resolve_target_user.
+SUNSHINE_CONFIG_DIR="${SUNSHINE_CONFIG_DIR:-}"
 
 # The setup menu: a checklist of the optional features below (pre-checked
 # from the INSTALL_*/... values above, so environment variables still set
@@ -92,7 +162,6 @@ SETUP_FEATURES=(
   "refind|INSTALL_REFIND|rEFInd boot menu (themed)"
   "lsfg|INSTALL_LSFG_VK|lsfg-vk frame generation (build from source)"
   "sunshine|INSTALL_SUNSHINE|Sunshine streaming host"
-  "steamsync|INSTALL_STEAM_SUNSHINE_SYNC|Add Steam games to Sunshine (game picker)"
 )
 
 # The same whiptail theme as steam-sunshine-sync.sh: white dialog, black
@@ -129,6 +198,10 @@ GRUB_GFXMODE="${GRUB_GFXMODE:-3440x1440,2560x1440,1920x1080,auto}"
 GRUB_TIMEOUT_SECONDS="${GRUB_TIMEOUT_SECONDS:-10}"
 GRUB_CONFIG_FILE="${GRUB_CONFIG_FILE:-/etc/default/grub}"
 GRUB_MKCONFIG_OUTPUT="${GRUB_MKCONFIG_OUTPUT:-/boot/grub2/grub.cfg}"
+# Around the generated part of refind.conf. Named after the former
+# fedora-refind-setup.sh, so machines set up by it are still recognized.
+REFIND_MARKER_BEGIN="# BEGIN fedora-refind-setup generated boot configuration"
+REFIND_MARKER_END="# END fedora-refind-setup generated boot configuration"
 
 # Hardware-specific quirk, not a universal need: many boards' watchdog chips
 # can't be cleanly disarmed on shutdown, so the kernel logs "watchdog did not
@@ -173,6 +246,14 @@ TARGET_HOME="$HOME"
 DNF_BIN=""
 DNF_SKIP_UNAVAILABLE_SUPPORTED=""
 STEP_COUNT=0
+
+# Set by the rEFInd, lsfg-vk and Sunshine steps, for the summary.
+ESP_MOUNT=""
+REFIND_BOOT_NUM=""
+SECURE_BOOT_STATE="unknown"
+REFIND_INSTALLED=0
+LSFG_VK_INSTALLED=0
+SUNSHINE_INSTALLED=0
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   COLOR_RESET=$'\033[0m'
@@ -345,6 +426,10 @@ resolve_target_user() {
   if [[ "$MCMOJAVE_CURSORS_DIR_WAS_SET" == "0" ]]; then
     MCMOJAVE_CURSORS_DIR="$TARGET_HOME/.cache/fedora-niri-setup/McMojave-cursors"
   fi
+
+  REFIND_THEME_DIR="${REFIND_THEME_DIR:-$TARGET_HOME/.cache/fedora-niri-setup/refind-theme}"
+  LSFG_VK_BUILD_DIR="${LSFG_VK_BUILD_DIR:-$TARGET_HOME/.cache/fedora-niri-setup/lsfg-vk}"
+  SUNSHINE_CONFIG_DIR="${SUNSHINE_CONFIG_DIR:-$TARGET_HOME/.config/sunshine}"
 
   log "Target user: $TARGET_USER"
   log "Target home: $TARGET_HOME"
@@ -522,7 +607,8 @@ backup_user_path() {
 
 backup_system_path() {
   local path="$1"
-  [[ -e "$path" ]] || return 0
+  # With sudo: some system paths (the EFI System Partition) are root-only.
+  run_sudo test -e "$path" || return 0
   if already_backed_up "$path" "${SYSTEM_BACKUPS[@]}"; then
     return 0
   fi
@@ -1031,11 +1117,11 @@ configure_plymouth_and_grub() {
     warn "grubby was not found; kernel arguments were not updated."
   fi
 
-  # With rEFInd as the boot menu, fedora-refind-setup.sh sets GRUB to hand
-  # off instantly (timeout 0, hidden). Setting a visible GRUB menu here would
-  # undo that and show two menus, so it's left alone then.
-  if [[ "$INSTALL_REFIND" == "1" ]] || refind_setup_installed; then
-    log "rEFInd is the boot menu; leaving GRUB's timeout to fedora-refind-setup.sh."
+  # With rEFInd as the boot menu, GRUB is set to hand off instantly
+  # (timeout 0, hidden; see configure_grub_handoff). Setting a visible GRUB
+  # menu here would undo that and show two menus, so it's left alone then.
+  if [[ "$INSTALL_REFIND" == "1" && -d /sys/firmware/efi ]] || refind_setup_installed; then
+    log "rEFInd is the boot menu; leaving GRUB's timeout to the rEFInd step."
   else
     upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
     upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
@@ -1047,14 +1133,15 @@ configure_plymouth_and_grub() {
   regenerate_grub_config
 }
 
-# Whether fedora-refind-setup.sh has configured rEFInd on this machine: its
-# generated block is in a refind.conf on the EFI System Partition.
+# Whether rEFInd has been set up on this machine (by this script, or the
+# former fedora-refind-setup.sh): its generated block is in a refind.conf on
+# the EFI System Partition.
 refind_setup_installed() {
   local esp conf
   for esp in /boot/efi /efi; do
     while IFS= read -r conf; do
       [[ -n "$conf" ]] || continue
-      run_sudo grep -qs '^# BEGIN fedora-refind-setup generated boot configuration$' "$conf" && return 0
+      run_sudo grep -qsxF "$REFIND_MARKER_BEGIN" "$conf" && return 0
     done < <(run_sudo find "$esp" -maxdepth 4 -iname refind.conf 2>/dev/null || true)
   done
   return 1
@@ -1672,82 +1759,517 @@ EOF
   record_change "Configured greetd to launch Noctalia Greeter with Niri as the default session."
 }
 
-# Runs one of this repo's standalone scripts from the config source. They
-# ask for sudo themselves and print their own summary; a failure is only a
-# warning here.
-run_repo_script() {
-  local script="$1"
-  local label="$2"
-  shift 2
-  local path="$CONFIG_SOURCE_DIR/$script"
+download_as_user() {
+  local url="$1"
+  local dest="$2"
 
-  if [[ ! -f "$path" ]]; then
-    warn "$script was not found in $CONFIG_SOURCE_DIR; skipping $label."
+  run_as_user mkdir -p "$(dirname "$dest")"
+  run_as_user curl -fL "$url" -o "$dest"
+}
+
+# The rEFInd, lsfg-vk and Sunshine steps return 1 (after a warning) instead
+# of stopping the script: by then the desktop is already set up, and one of
+# them failing shouldn't keep the others from running. Called with `||`,
+# so errexit is off inside them: every step that matters is checked.
+
+detect_secure_boot() {
+  have_command mokutil || dnf_install_best_effort mokutil
+
+  if have_command mokutil; then
+    local sb_out
+    sb_out="$(run_sudo mokutil --sb-state 2>&1 || true)"
+    if grep -qi 'SecureBoot enabled' <<<"$sb_out"; then
+      SECURE_BOOT_STATE="enabled"
+    elif grep -qi 'SecureBoot disabled' <<<"$sb_out"; then
+      SECURE_BOOT_STATE="disabled"
+    fi
+  else
+    warn "mokutil is not available; could not determine Secure Boot state."
+  fi
+
+  log "Secure Boot state: $SECURE_BOOT_STATE"
+  if [[ "$SECURE_BOOT_STATE" == "enabled" ]]; then
+    warn "Secure Boot is ENABLED. rEFInd is installed via --shim/--localkeys, but you must approve its key in the blue MokManager screen at the next reboot, or it won't boot into rEFInd. If that happens, pick the original 'Fedora' entry in the firmware boot menu (F12/F2 at POST); it is untouched."
+  fi
+}
+
+# Finds the EFI System Partition: the mount holding Fedora's shim.
+resolve_esp_mount() {
+  if [[ -n "$ESP_MOUNT_OVERRIDE" ]]; then
+    run_sudo test -f "$ESP_MOUNT_OVERRIDE$REFIND_SHIM_LOADER_PATH" || {
+      warn "ESP_MOUNT_OVERRIDE=$ESP_MOUNT_OVERRIDE does not contain $REFIND_SHIM_LOADER_PATH."
+      return 1
+    }
+    ESP_MOUNT="$ESP_MOUNT_OVERRIDE"
+  else
+    local candidates=(/boot/efi /efi /boot) c
+    mapfile -t -O 3 candidates < <(findmnt -rn -o TARGET --types vfat 2>/dev/null || true)
+    for c in "${candidates[@]}"; do
+      [[ -n "$c" ]] || continue
+      if run_sudo test -f "$c$REFIND_SHIM_LOADER_PATH"; then
+        ESP_MOUNT="$c"
+        break
+      fi
+    done
+  fi
+
+  [[ -n "$ESP_MOUNT" ]] || {
+    warn "Could not find $REFIND_SHIM_LOADER_PATH under /boot/efi, /efi, /boot or any mounted vfat filesystem. Set ESP_MOUNT_OVERRIDE and/or REFIND_SHIM_LOADER_PATH if your layout is unusual."
+    return 1
+  }
+  log "EFI System Partition: $ESP_MOUNT"
+}
+
+install_refind_package() {
+  if [[ "$(rpm -q --qf '%{VERSION}' refind 2>/dev/null || true)" == "$REFIND_VERSION" ]] && have_command refind-install; then
+    log "rEFInd $REFIND_VERSION is already installed."
     return 0
   fi
 
-  log "Running $script ($label)."
-  if "$@" bash "$path"; then
-    record_change "Ran $script ($label)."
+  local rpm_path="$TARGET_HOME/.cache/fedora-niri-setup/downloads/refind-${REFIND_VERSION}-1.x86_64.rpm"
+  if run_as_user test -f "$rpm_path" && file "$rpm_path" 2>/dev/null | grep -qi 'RPM'; then
+    log "Using already-downloaded rEFInd $REFIND_VERSION package."
   else
-    warn "$script failed; see its output above. Re-run it on its own once the problem is fixed: bash $path"
+    log "Downloading rEFInd $REFIND_VERSION."
+    download_as_user "$REFIND_RPM_URL" "$rpm_path" || {
+      warn "Could not download rEFInd from $REFIND_RPM_URL. Check REFIND_VERSION / REFIND_RPM_URL."
+      return 1
+    }
+    # SourceForge sometimes serves an HTML page instead of the file.
+    file "$rpm_path" 2>/dev/null | grep -qi 'RPM' || {
+      warn "The download at $rpm_path is not an RPM (SourceForge likely served a web page instead). Download the .rpm manually and set REFIND_RPM_URL=file://<path>."
+      return 1
+    }
+  fi
+
+  # An upstream release asset with no signing key configured here; the GPG
+  # check is skipped explicitly so dnf can't stop at a prompt.
+  local args=(install --setopt=localpkg_gpgcheck=0)
+  [[ "$ASSUME_YES" == "1" ]] && args+=(-y)
+  run_sudo "$DNF_BIN" "${args[@]}" "$rpm_path" || {
+    warn "Could not install the downloaded rEFInd package."
+    return 1
+  }
+  have_command refind-install || {
+    warn "rEFInd was installed, but refind-install was not found in PATH."
+    return 1
+  }
+  record_change "Installed rEFInd $REFIND_VERSION."
+}
+
+run_refind_install() {
+  if [[ "$REFIND_USE_LOCALKEYS" == "1" ]] && ! have_command sbsign; then
+    log "Installing sbsigntools (sbsign, needed by --localkeys)."
+    dnf_install_best_effort sbsigntools
+    have_command sbsign || {
+      warn "sbsign was not found after installing sbsigntools; refind-install --localkeys can't run. Set REFIND_USE_LOCALKEYS=0 to skip self-signing."
+      return 1
+    }
+  fi
+
+  log "Firmware boot entries before installing rEFInd (none of them is removed):"
+  run_sudo efibootmgr -v || true
+
+  # --shim copies the shim into rEFInd's own EFI/refind/ directory and makes
+  # a new entry; Fedora's own NVRAM entry is not reused or changed.
+  local args=()
+  [[ "$REFIND_USE_SHIM" == "1" ]] && args+=(--shim "$ESP_MOUNT$REFIND_SHIM_LOADER_PATH")
+  [[ "$REFIND_USE_LOCALKEYS" == "1" ]] && args+=(--localkeys)
+  # Without --yes, refind-install asks its own questions (e.g. "--shim but
+  # Secure Boot is off, continue?"); only answered for unattended runs.
+  [[ "$ASSUME_YES" == "1" ]] && args+=(--yes)
+
+  log "Running: refind-install ${args[*]}"
+  run_sudo refind-install "${args[@]}" || {
+    warn "refind-install failed. Your 'Fedora' firmware boot entry is untouched; the machine still boots normally."
+    return 1
+  }
+
+  local after_entries refind_lines refind_entry_count expected_entries=1
+  after_entries="$(run_sudo efibootmgr -v || true)"
+  log "Firmware boot entries after installing rEFInd:"
+  printf '%s\n' "$after_entries"
+
+  # --shim registers two entries: the shim-chained one (what boots) and a
+  # "(direct)" one bypassing shim. The summary's undo step names the first.
+  # With -v the device path follows the title, so the title isn't matched
+  # up to the end of the line.
+  refind_lines="$(grep -E '^Boot[0-9A-Fa-f]{4}\*? rEFInd' <<<"$after_entries" || true)"
+  REFIND_BOOT_NUM="$(grep -v '(direct)' <<<"$refind_lines" | head -1 | grep -oE '^Boot[0-9A-Fa-f]{4}' | cut -c5-8 || true)"
+  [[ -n "$REFIND_BOOT_NUM" ]] || REFIND_BOOT_NUM="$(head -1 <<<"$refind_lines" | grep -oE '^Boot[0-9A-Fa-f]{4}' | cut -c5-8 || true)"
+
+  [[ "$REFIND_USE_SHIM" == "1" ]] && expected_entries=2
+  refind_entry_count="$(grep -c . <<<"$refind_lines" || true)"
+  if ((refind_entry_count > expected_entries)); then
+    warn "Found $refind_entry_count firmware boot entries labeled 'rEFInd' (expected $expected_entries). Remove stale duplicates with: sudo efibootmgr -b <NUM> -B"
+  fi
+
+  record_change "Registered rEFInd as firmware boot entry Boot${REFIND_BOOT_NUM:-?} (the Fedora entry is left in place)."
+}
+
+find_refind_conf() {
+  if [[ -n "$REFIND_CONF_PATH" ]]; then
+    if run_sudo test -f "$REFIND_CONF_PATH"; then
+      printf '%s\n' "$REFIND_CONF_PATH"
+      return 0
+    fi
+    warn "REFIND_CONF_PATH=$REFIND_CONF_PATH does not exist; searching for refind.conf instead."
+  fi
+
+  local hit
+  hit="$(run_sudo find "$ESP_MOUNT" -maxdepth 4 -iname 'refind.conf' 2>/dev/null | head -1)"
+  [[ -n "$hit" ]] || return 1
+  printf '%s\n' "$hit"
+}
+
+install_refind_theme() {
+  local refind_conf="$1"
+
+  log "Fetching rEFInd theme from $REFIND_THEME_REPO."
+  clone_or_update_git_repo "$REFIND_THEME_REPO" "$REFIND_THEME_DIR"
+  [[ -f "$REFIND_THEME_DIR/theme.conf" ]] || {
+    warn "$REFIND_THEME_DIR has no theme.conf, so it's not a rEFInd theme; skipping the theme."
+    return 0
+  }
+
+  local theme_dest tmp_theme
+  theme_dest="$(dirname "$refind_conf")/themes/$REFIND_THEME_NAME"
+
+  backup_system_path "$theme_dest"
+  run_sudo rm -rf "$theme_dest"
+  run_sudo mkdir -p "$theme_dest"
+  tmp_theme="$(mktemp -d)"
+  cp -r "$REFIND_THEME_DIR/." "$tmp_theme/"
+  rm -rf "$tmp_theme/.git"
+  # -r, not -a: the ESP is vfat, which has no Unix ownership, so cp -a fails
+  # trying to chown there even as root.
+  run_sudo cp -r "$tmp_theme/." "$theme_dest/"
+  rm -rf "$tmp_theme"
+  run_sudo test -f "$theme_dest/theme.conf" || {
+    warn "Copying the rEFInd theme to $theme_dest failed (no theme.conf there afterwards)."
+    return 1
+  }
+  record_change "Installed rEFInd theme '$REFIND_THEME_NAME' to $theme_dest."
+
+  if run_sudo grep -qE "^include[[:space:]]+themes/${REFIND_THEME_NAME}/theme\.conf[[:space:]]*\$" "$refind_conf"; then
+    log "Theme already included in $refind_conf."
+    return 0
+  fi
+
+  local tmp
+  backup_system_path "$refind_conf"
+  tmp="$(mktemp)"
+  run_sudo cat "$refind_conf" >"$tmp"
+  printf '\ninclude themes/%s/theme.conf\n' "$REFIND_THEME_NAME" >>"$tmp"
+  run_sudo install -m 0644 "$tmp" "$refind_conf"
+  rm -f "$tmp"
+  record_change "Enabled rEFInd theme '$REFIND_THEME_NAME' in $refind_conf."
+}
+
+configure_refind_boot_entry() {
+  local refind_conf="$1"
+  local refind_dir tmp icon_line="" resolution_line="" dont_scan_line=""
+
+  backup_system_path "$refind_conf"
+
+  # Copies everything except the previous generated block, and drops blank
+  # lines at the end (printed only once something follows them), so the
+  # blank line added before the block below doesn't pile up on every re-run.
+  tmp="$(mktemp)"
+  run_sudo awk -v marker_begin="$REFIND_MARKER_BEGIN" -v marker_end="$REFIND_MARKER_END" '
+    $0 == marker_begin { skipping = 1; next }
+    $0 == marker_end { skipping = 0; next }
+    skipping { next }
+    /^[[:space:]]*$/ { blank++; next }
+    { while (blank > 0) { print ""; blank-- } print }
+  ' "$refind_conf" >"$tmp"
+
+  [[ ! -s "$tmp" ]] || printf '\n' >>"$tmp"
+
+  # Theme includes are relative to refind.conf's directory, but a menuentry's
+  # icon needs a path from the ESP root (leading slash, like loader). Mixing
+  # them up gives no error, just a hazard-stripe placeholder at boot.
+  refind_dir="$(dirname "$refind_conf")"
+  if run_sudo test -f "$refind_dir/$REFIND_MENUENTRY_ICON"; then
+    icon_line="    icon     ${refind_dir#"$ESP_MOUNT"}/$REFIND_MENUENTRY_ICON"
+  else
+    warn "Theme icon $REFIND_MENUENTRY_ICON was not found next to $refind_conf; rEFInd will use its default icon."
+  fi
+  if [[ -n "$REFIND_RESOLUTION_WIDTH" && -n "$REFIND_RESOLUTION_HEIGHT" ]]; then
+    resolution_line="resolution $REFIND_RESOLUTION_WIDTH $REFIND_RESOLUTION_HEIGHT"
+  fi
+  [[ -z "$REFIND_DONT_SCAN_DIRS" ]] || dont_scan_line="dont_scan_dirs $REFIND_DONT_SCAN_DIRS"
+
+  cat >>"$tmp" <<EOF
+$REFIND_MARKER_BEGIN
+timeout $REFIND_TIMEOUT_SECONDS
+scanfor $REFIND_SCANFOR
+$dont_scan_line
+scan_all_linux_kernels $REFIND_SCAN_ALL_LINUX_KERNELS
+$resolution_line
+
+menuentry "$REFIND_MENUENTRY_LABEL" {
+$icon_line
+    loader   $REFIND_SHIM_LOADER_PATH
+    ostype   Linux
+    graphics on
+}
+$REFIND_MARKER_END
+EOF
+
+  run_sudo install -m 0644 "$tmp" "$refind_conf" || {
+    rm -f "$tmp"
+    warn "Could not write $refind_conf."
+    return 1
+  }
+  rm -f "$tmp"
+  record_change "Configured rEFInd's '$REFIND_MENUENTRY_LABEL' entry (chainloads $REFIND_SHIM_LOADER_PATH) and ${REFIND_TIMEOUT_SECONDS}s timeout in $refind_conf."
+}
+
+# GRUB boots instantly once rEFInd hands off to it, so there's one menu.
+configure_grub_handoff() {
+  upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_TARGET\""
+  upsert_grub_default GRUB_TIMEOUT_STYLE "\"$GRUB_TIMEOUT_STYLE_TARGET\""
+  regenerate_grub_config
+  record_change "Set GRUB_TIMEOUT=$GRUB_TIMEOUT_TARGET and GRUB_TIMEOUT_STYLE=$GRUB_TIMEOUT_STYLE_TARGET (GRUB hands off instantly after rEFInd)."
+}
+
+install_refind() {
+  [[ -d /sys/firmware/efi ]] || {
+    warn "This machine is not booted in UEFI mode; rEFInd needs UEFI, so it was skipped."
+    return 0
+  }
+
+  detect_secure_boot
+  resolve_esp_mount || return 1
+  install_refind_package || return 1
+  run_refind_install || return 1
+
+  local refind_conf
+  refind_conf="$(find_refind_conf || true)"
+  [[ -n "$refind_conf" ]] || {
+    warn "refind-install succeeded, but no refind.conf was found under $ESP_MOUNT."
+    return 1
+  }
+  install_refind_theme "$refind_conf" || return 1
+  configure_refind_boot_entry "$refind_conf" || return 1
+  configure_grub_handoff
+  REFIND_INSTALLED=1
+}
+
+install_lsfg_vk_dependencies() {
+  log "Installing lsfg-vk build dependencies."
+  dnf_install \
+    git curl \
+    llvm clang clang-tools-extra \
+    cmake ninja-build pkgconf-pkg-config \
+    vulkan-loader-devel \
+    mesa-libGL-devel \
+    qt6-qtbase-devel \
+    qt6-qttools-devel \
+    qt6-qtdeclarative-devel || {
+    warn "Could not install the lsfg-vk build dependencies."
+    return 1
+  }
+
+  [[ "$INSTALL_VULKAN_TOOLS" == "1" ]] || return 0
+  package_installed vulkan-tools || dnf_install_optional vulkan-tools || true
+}
+
+clone_or_update_lsfg_vk() {
+  local dir="$LSFG_VK_BUILD_DIR"
+
+  if [[ -d "$dir/.git" ]]; then
+    log "Updating the lsfg-vk checkout at $dir."
+    run_as_user git -C "$dir" fetch --tags origin || {
+      warn "Could not fetch lsfg-vk updates."
+      return 1
+    }
+    if [[ -z "$LSFG_VK_REPO_TAG" ]]; then
+      { run_as_user git -C "$dir" checkout main || run_as_user git -C "$dir" checkout master; } &&
+        run_as_user git -C "$dir" pull --ff-only || {
+        warn "Could not update lsfg-vk to the latest source."
+        return 1
+      }
+    fi
+  else
+    log "Cloning lsfg-vk from $LSFG_VK_REPO_URL."
+    run_as_user mkdir -p "$(dirname "$dir")"
+    run_as_user git clone "$LSFG_VK_REPO_URL" "$dir" || {
+      warn "Could not clone lsfg-vk."
+      return 1
+    }
+  fi
+
+  if [[ -n "$LSFG_VK_REPO_TAG" ]]; then
+    run_as_user git -C "$dir" checkout "tags/$LSFG_VK_REPO_TAG" || {
+      warn "Could not check out lsfg-vk tag $LSFG_VK_REPO_TAG."
+      return 1
+    }
+  fi
+}
+
+install_lsfg_vk() {
+  install_lsfg_vk_dependencies || return 1
+  clone_or_update_lsfg_vk || return 1
+
+  local lto_flag=OFF ui_flag=OFF
+  [[ "$LSFG_VK_ENABLE_LTO" == "1" ]] && lto_flag=ON
+  [[ "$LSFG_VK_BUILD_UI" == "1" ]] && ui_flag=ON
+
+  log "Configuring the lsfg-vk build (prefix: $LSFG_VK_INSTALL_PREFIX, type: $LSFG_VK_BUILD_TYPE, UI: $ui_flag)."
+  run_as_user cmake -S "$LSFG_VK_BUILD_DIR" -B "$LSFG_VK_BUILD_DIR/build" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$LSFG_VK_BUILD_TYPE" \
+    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION="$lto_flag" \
+    -DCMAKE_INSTALL_PREFIX="$LSFG_VK_INSTALL_PREFIX" \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DLSFGVK_BUILD_UI="$ui_flag" || {
+    warn "lsfg-vk's CMake configuration failed."
+    return 1
+  }
+
+  log "Building lsfg-vk (this can take a while)."
+  run_as_user cmake --build "$LSFG_VK_BUILD_DIR/build" || {
+    warn "The lsfg-vk build failed."
+    return 1
+  }
+
+  run_sudo cmake --install "$LSFG_VK_BUILD_DIR/build" || {
+    warn "Installing lsfg-vk to $LSFG_VK_INSTALL_PREFIX failed."
+    return 1
+  }
+  record_change "Built and installed lsfg-vk to $LSFG_VK_INSTALL_PREFIX."
+  LSFG_VK_INSTALLED=1
+
+  if have_command lsfg-vk-cli; then
+    log "Running the lsfg-vk-cli healthcheck."
+    run_as_user lsfg-vk-cli healthcheck || warn "The lsfg-vk-cli healthcheck reported issues; see its output above."
+  else
+    warn "lsfg-vk-cli was not found on PATH after installing; skipped its healthcheck."
+  fi
+}
+
+# Sets output_name (the connector Sunshine captures) in sunshine.conf.
+configure_sunshine_capture_output() {
+  local config_file="$SUNSHINE_CONFIG_DIR/sunshine.conf"
+  local tmp
+
+  if [[ -f "$config_file" ]] && grep -qE "^output_name *= *$SUNSHINE_CAPTURE_OUTPUT\$" "$config_file"; then
+    log "Sunshine's capture output is already $SUNSHINE_CAPTURE_OUTPUT."
+    return 0
+  fi
+
+  tmp="$(mktemp)"
+  if [[ -f "$config_file" ]]; then
+    grep -v '^output_name' "$config_file" >"$tmp" || true
+  fi
+  printf 'output_name = %s\n' "$SUNSHINE_CAPTURE_OUTPUT" >>"$tmp"
+  write_user_file "$config_file" 0644 <"$tmp"
+  rm -f "$tmp"
+  record_change "Set Sunshine's capture output (output_name) to $SUNSHINE_CAPTURE_OUTPUT in $config_file."
+}
+
+# Sunshine's user service as installed: app-dev.lizardbyte.app.Sunshine in
+# current packages, sunshine in older ones. systemd won't enable a unit by
+# an alias name, and current packages only keep "sunshine" as an alias.
+sunshine_unit() {
+  local unit dir
+  for unit in app-dev.lizardbyte.app.Sunshine.service sunshine.service; do
+    for dir in /usr/lib/systemd/user /usr/local/lib/systemd/user /etc/systemd/user; do
+      if [[ -f "$dir/$unit" && ! -L "$dir/$unit" ]]; then
+        printf '%s' "$unit"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+install_sunshine() {
+  enable_copr_repo "$SUNSHINE_COPR" "Sunshine" || return 1
+  dnf_install_optional Sunshine || return 1
+  record_change "Installed Sunshine from COPR $SUNSHINE_COPR."
+  SUNSHINE_INSTALLED=1
+
+  configure_sunshine_capture_output
+
+  if [[ "$ENABLE_SUNSHINE_AUTOSTART" != "1" ]]; then
+    log "Sunshine autostart is disabled."
+    return 0
+  fi
+  local unit
+  unit="$(sunshine_unit || true)"
+  [[ -n "$unit" ]] || {
+    warn "Could not find Sunshine's systemd user service; autostart was not set up."
+    return 0
+  }
+  if set_systemd_user_service "$unit"; then
+    record_change "Enabled the Sunshine user service ($unit) to start on login."
   fi
 }
 
 install_extras() {
   if [[ "$INSTALL_REFIND" == "1" ]]; then
-    run_repo_script fedora-refind-setup.sh "rEFInd boot menu" \
-      env ASSUME_YES="$ASSUME_YES" TARGET_USER="$TARGET_USER"
+    log "Setting up the rEFInd boot menu."
+    install_refind || warn "rEFInd setup stopped early (see above); re-run the script once it's fixed. Your 'Fedora' firmware boot entry is untouched."
   else
     log "rEFInd setup is disabled."
   fi
 
   if [[ "$INSTALL_LSFG_VK" == "1" ]]; then
-    run_repo_script install-lsfg-vk.sh "lsfg-vk frame generation" env
+    log "Building lsfg-vk frame generation."
+    install_lsfg_vk || warn "lsfg-vk was not installed (see above); re-run the script once it's fixed."
   else
     log "lsfg-vk installation is disabled."
   fi
 
-  # Sunshine's config and autostart belong to the target user.
   if [[ "$INSTALL_SUNSHINE" == "1" ]]; then
-    run_repo_script install-sunshine.sh "Sunshine streaming host" run_as_user env
+    log "Installing the Sunshine streaming host."
+    install_sunshine || warn "Sunshine was not installed (see above); re-run the script once it's fixed."
   else
     log "Sunshine installation is disabled."
   fi
-
-  if [[ "$INSTALL_STEAM_SUNSHINE_SYNC" == "1" ]]; then
-    sync_steam_games_into_sunshine
-  else
-    log "Steam -> Sunshine game sync is disabled."
-  fi
 }
 
-# Opens steam-sunshine-sync.sh's game picker (pre-checked with the current
-# selection) and syncs the chosen games into the target user's Sunshine
-# apps. The picker draws on the terminal, which this script's output (piped
-# into the log) isn't -- so it talks to /dev/tty directly, and its screens
-# aren't in the log.
-sync_steam_games_into_sunshine() {
-  if ! have_command sunshine; then
-    log "Sunshine is not installed; skipping the Steam -> Sunshine game sync."
-    return 0
-  fi
-  if ! { : </dev/tty >/dev/tty; } 2>/dev/null; then
-    warn "No terminal for the Steam game picker; run steam-sunshine-sync.sh yourself later to add games to Sunshine."
-    return 0
+# The manual steps left after rEFInd, lsfg-vk and Sunshine, which can't be
+# scripted.
+print_next_steps() {
+  ((REFIND_INSTALLED || LSFG_VK_INSTALLED || SUNSHINE_INSTALLED)) || return 0
+
+  printf '\n  %sNext steps:%s\n' "$COLOR_GREEN" "$COLOR_RESET"
+
+  if ((SUNSHINE_INSTALLED)); then
+    printf '\n  Sunshine:\n'
+    printf '  1. Open https://localhost:47990 and create the Sunshine admin login.\n'
+    printf '     Sunshine accepts no streams until that is done.\n'
+    printf '  2. Log in to Steam and install games, then add them to Sunshine with:\n'
+    printf '     bash %s/steam-sunshine-sync.sh --select\n' "$CONFIG_SOURCE_DIR"
   fi
 
-  local path="$CONFIG_SOURCE_DIR/steam-sunshine-sync.sh"
-  if [[ ! -f "$path" ]]; then
-    warn "steam-sunshine-sync.sh was not found in $CONFIG_SOURCE_DIR; skipping the Steam -> Sunshine game sync."
-    return 0
+  if ((LSFG_VK_INSTALLED)); then
+    printf '\n  lsfg-vk:\n'
+    printf '  1. Buy and install Lossless Scaling on Steam, and switch it to the\n'
+    printf '     "lsfg-vk" beta branch (right-click > Properties > Betas). If your\n'
+    printf '     Steam library is in an unusual place, set "dll" under [global] in\n'
+    printf '     ~/.config/lsfg-vk/conf.toml.\n'
+    printf '  2. Run lsfg-vk-ui to create a profile, or launch a game with\n'
+    printf '     LSFGVK_PROFILE=<name>.\n'
+    printf '  3. Check the layer loads with vkcube (DISABLE_LSFGVK=1 vkcube to\n'
+    printf '     compare). Pacing mode needs Vsync on. Docs: https://lsfg-vk.dev/docs/getting-started/\n'
   fi
 
-  log "Opening the Steam -> Sunshine game picker (on the terminal; not included in the log)."
-  if run_as_user env bash "$path" --select --skip-if-no-games </dev/tty >/dev/tty 2>/dev/tty; then
-    record_change "Ran steam-sunshine-sync.sh (Steam games in Sunshine)."
-  else
-    warn "steam-sunshine-sync.sh failed; see its output above. Re-run it on its own once the problem is fixed: bash $path --select"
+  if ((REFIND_INSTALLED)); then
+    printf '\n  rEFInd (to undo, if you ever need to):\n'
+    if [[ -n "$REFIND_BOOT_NUM" ]]; then
+      printf '  1. sudo efibootmgr -b %s -B   # removes the rEFInd boot entry\n' "$REFIND_BOOT_NUM"
+    else
+      printf '  1. sudo efibootmgr -v, find the "rEFInd" entry (Boot####), then\n'
+      printf '     sudo efibootmgr -b <####> -B\n'
+    fi
+    printf '  2. sudo cp -a %s/etc/default/grub /etc/default/grub\n' "$SYSTEM_BACKUP_ROOT"
+    printf '  3. sudo grub2-mkconfig -o %s\n' "$GRUB_MKCONFIG_OUTPUT"
+    printf '  The original "Fedora" firmware boot entry is untouched; the firmware boot\n'
+    printf '  menu (F12/F2 at POST) can always select it.\n'
   fi
 }
 
@@ -1775,6 +2297,8 @@ print_summary() {
       printf '  %s⚠%s  %s\n' "$COLOR_YELLOW" "$COLOR_RESET" "$item"
     done
   fi
+
+  print_next_steps
 
   printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n' "$COLOR_GREEN" "$COLOR_RESET"
 }

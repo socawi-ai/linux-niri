@@ -5,9 +5,9 @@ set -Eeuo pipefail
 # apps.json as detached "steam://rungameid/<appid>" launchers, with cover
 # art pulled from Steam's public CDN (no SteamGridDB account needed).
 #
-# Fully standalone -- does not require fedora-niri-setup.sh or
-# install-sunshine.sh to have been run first. Steam and Sunshine are
-# just expected to already be installed by the time this runs.
+# Fully standalone -- does not require fedora-niri-setup.sh to have been
+# run first. Steam and Sunshine are just expected to already be installed
+# by the time this runs.
 #
 # Safe to re-run at any time (e.g. after installing/uninstalling games): it
 # only ever touches its own slice of apps.json -- entries whose "detached"
@@ -157,7 +157,7 @@ Options:
   --skip-if-no-games
                 Exit successfully (with a note) instead of failing when Steam
                 or installed games aren't found, e.g. right after a fresh
-                install (used by fedora-niri-setup.sh)
+                install
   -h, --help    Show this help and exit
 
 Config is overridable via environment variables; see the top of this
