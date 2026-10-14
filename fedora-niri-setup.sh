@@ -137,10 +137,19 @@ SUNSHINE_CAPTURE_OUTPUT="${SUNSHINE_CAPTURE_OUTPUT:-DP-2}"
 # Defaults under the target user's home, set in resolve_target_user.
 SUNSHINE_CONFIG_DIR="${SUNSHINE_CONFIG_DIR:-}"
 
-# The setup menu: a checklist of the optional features below (pre-checked
-# from the INSTALL_*/... values above, so environment variables still set
-# the defaults), shown when there's a terminal. SETUP_MENU=0 or --no-menu
-# skips it and uses those values as they are, e.g. for unattended runs.
+# What the script does:
+#   full    -- the whole setup: packages, apps, boot, configs, greeter, ...
+#   configs -- only fetch this repo and put its configs and wallpapers in
+#              place (niri, Alacritty, Noctalia), replacing the local ones.
+#              No sudo, no packages. Same as --configs-only.
+# The setup menu asks, unless SETUP_MODE or --configs-only already says.
+SETUP_MODE="${SETUP_MODE:-}"
+
+# The setup menu: the mode, then for a full install a checklist of the
+# optional features below (pre-checked from the INSTALL_*/... values above,
+# so environment variables still set the defaults), shown when there's a
+# terminal. SETUP_MENU=0 or --no-menu skips it and uses those values as
+# they are (and SETUP_MODE, or full), e.g. for unattended runs.
 SETUP_MENU="${SETUP_MENU:-1}"
 
 # "tag|variable|label" -- the menu's optional features, in menu order. The
@@ -441,13 +450,16 @@ usage() {
   cat <<EOF
 Usage: fedora-niri-setup.sh [options]
 
-Sets up a Niri desktop on Fedora. Opens a menu to choose the optional
-features first when run from a terminal.
+Sets up a Niri desktop on Fedora, or only updates this repo's configs on
+it. Run from a terminal, a menu asks which, and for a full install which
+optional features to set up.
 
 Options:
-  --no-menu     Skip the menu; use the defaults and INSTALL_*/... environment
-                variables as they are (same as SETUP_MENU=0)
-  -h, --help    Show this help and exit
+  --configs-only  Only fetch this repo and put its configs and wallpapers
+                  in place; no sudo, no packages (same as SETUP_MODE=configs)
+  --no-menu       Skip the menu; use the defaults and INSTALL_*/...
+                  environment variables as they are (same as SETUP_MENU=0)
+  -h, --help      Show this help and exit
 
 See the top of the script for all environment variables.
 EOF
@@ -462,12 +474,18 @@ start_logging() {
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --configs-only) SETUP_MODE=configs ;;
       --no-menu) SETUP_MENU=0 ;;
       -h|--help) usage; exit 0 ;;
       *) die "Unknown argument: $1 (see --help)." ;;
     esac
     shift
   done
+
+  case "$SETUP_MODE" in
+    ""|full|configs) ;;
+    *) die "SETUP_MODE must be full or configs, not '$SETUP_MODE'." ;;
+  esac
 }
 
 # Whether /dev/tty can be opened: the menu draws there directly, since this
@@ -487,42 +505,74 @@ whiptail_tty() {
   return "$status"
 }
 
-# The setup menu: a checklist of SETUP_FEATURES, then a confirmation. Sets
-# each feature's variable to 1 or 0. Cancelling exits before anything has
-# been changed.
-choose_features() {
+# The setup menu: the mode (unless already given), then for a full install
+# the feature checklist. Without the menu, the mode defaults to full.
+# Cancelling exits before anything has been changed.
+setup_menu() {
   if [[ "$SETUP_MENU" != "1" ]]; then
     log "Setup menu skipped; using the defaults and environment variables."
-    return 0
-  fi
-  if ! have_terminal; then
+  elif ! have_terminal; then
     log "No terminal for the setup menu; using the defaults and environment variables."
-    return 0
-  fi
-  if ! have_command whiptail; then
-    log "Installing whiptail (newt) for the setup menu."
-    run_sudo "$DNF_BIN" install -y newt || true
-  fi
-  if ! have_command whiptail; then
-    warn "whiptail is not available; skipping the setup menu and using the defaults and environment variables."
-    return 0
+  else
+    if ! have_command whiptail; then
+      log "Installing whiptail (newt) for the setup menu."
+      run_sudo "$DNF_BIN" install -y newt || true
+    fi
+    if have_command whiptail; then
+      [[ -n "$SETUP_MODE" ]] || choose_mode
+      [[ "$SETUP_MODE" == "configs" ]] || choose_features
+    else
+      warn "whiptail is not available; skipping the setup menu and using the defaults and environment variables."
+    fi
   fi
 
-  local entry tag var label selection chosen skipped
-  local -a items=()
+  SETUP_MODE="${SETUP_MODE:-full}"
+  if [[ "$SETUP_MODE" == "configs" ]]; then
+    TOTAL_SECTIONS=3
+  fi
+}
 
-  # Sized to the terminal (whiptail can't draw a box taller or wider than
-  # it): the checklist scrolls when the features don't all fit.
-  local rows=24 cols=80 size
+# The menu's size, fitted to the terminal (whiptail can't draw a box taller
+# or wider than it). Sets menu_height, menu_width and menu_list_height for
+# a list of $1 items.
+menu_size() {
+  local items="$1" rows=24 cols=80 size
   size="$(stty size </dev/tty 2>/dev/null || true)"
   # Some consoles report 0 0; keep the 24x80 fallback then.
   if [[ "$size" =~ ^([0-9]+)\ ([0-9]+)$ ]] && ((BASH_REMATCH[1] >= 15 && BASH_REMATCH[2] >= 50)); then
     rows="${BASH_REMATCH[1]}"
     cols="${BASH_REMATCH[2]}"
   fi
-  local width=$((cols - 4 < 78 ? cols - 4 : 78))
-  local height=$((rows - 2 < ${#SETUP_FEATURES[@]} + 9 ? rows - 2 : ${#SETUP_FEATURES[@]} + 9))
-  local list_height=$((height - 9 < 4 ? 4 : height - 9))
+  menu_width=$((cols - 4 < 78 ? cols - 4 : 78))
+  menu_height=$((rows - 2 < items + 9 ? rows - 2 : items + 9))
+  menu_list_height=$((menu_height - 9 < 4 ? 4 : menu_height - 9))
+}
+
+choose_mode() {
+  local menu_height menu_width menu_list_height
+  menu_size 2
+
+  if ! SETUP_MODE="$(whiptail_tty --title "Fedora Niri Setup" \
+      --ok-button "Next" --cancel-button "Quit" --menu \
+      "What do you want to do?" \
+      "$menu_height" "$menu_width" "$menu_list_height" \
+      full "Full install (packages, apps, boot, configs, ...)" \
+      configs "Update configs only (niri, Alacritty, Noctalia, wallpapers)")"; then
+    log "Setup cancelled from the menu; nothing was changed."
+    exit 0
+  fi
+}
+
+# The feature checklist, then a confirmation. Sets each feature's variable
+# to 1 or 0.
+choose_features() {
+  local entry tag var label selection chosen skipped
+  local -a items=()
+
+  # The checklist scrolls when the features don't all fit.
+  local menu_height menu_width menu_list_height
+  menu_size "${#SETUP_FEATURES[@]}"
+  local height="$menu_height" width="$menu_width" list_height="$menu_list_height"
 
   while true; do
     items=()
@@ -574,10 +624,13 @@ Skip: ${skipped:-nothing}." "$height" "$width" >/dev/null; then
 
 prepare_runtime() {
   run_as_user mkdir -p "$USER_BACKUP_ROOT"
-  run_sudo install -d -m 0755 "$SYSTEM_BACKUP_ROOT"
-  run_sudo -v
   log "Log file: $LOG_FILE"
   log "User backups: $USER_BACKUP_ROOT"
+
+  # Updating configs only touches the user's own files.
+  [[ "$SETUP_MODE" == "full" ]] || return 0
+  run_sudo install -d -m 0755 "$SYSTEM_BACKUP_ROOT"
+  run_sudo -v
   log "System backups: $SYSTEM_BACKUP_ROOT"
 }
 
@@ -2282,7 +2335,7 @@ print_summary() {
   printf '\n'
   printf '  Log:            %s\n' "$LOG_FILE"
   printf '  User backups:   %s\n' "$USER_BACKUP_ROOT"
-  printf '  System backups: %s\n' "$SYSTEM_BACKUP_ROOT"
+  [[ "$SETUP_MODE" != "full" ]] || printf '  System backups: %s\n' "$SYSTEM_BACKUP_ROOT"
 
   if ((${#CHANGES[@]})); then
     printf '\n  %sChanges:%s\n' "$COLOR_GREEN" "$COLOR_RESET"
@@ -2303,15 +2356,36 @@ print_summary() {
   printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n' "$COLOR_GREEN" "$COLOR_RESET"
 }
 
+# Configs only: this repo's configs and wallpapers, and the Noctalia
+# wallpaper settings (its config directory is replaced with the repo's).
+update_configs() {
+  section "Repo configs"
+  have_command git || die "git is needed to fetch the config repo; install it, or run the full install."
+  clone_or_update_config_repo
+  verify_config_source
+  install_user_configs
+  install_wallpapers
+  configure_noctalia_settings
+
+  section "Summary"
+  print_summary
+}
+
 main() {
   parse_args "$@"
   start_logging
   print_banner
-  section "Fedora Niri setup"
   require_fedora
+  setup_menu
+  section "Fedora Niri setup"
+  log "Mode: $([[ "$SETUP_MODE" == "configs" ]] && printf 'update configs only' || printf 'full install')"
   resolve_target_user
-  choose_features
   prepare_runtime
+
+  if [[ "$SETUP_MODE" == "configs" ]]; then
+    update_configs
+    return 0
+  fi
 
   section "Base packages"
   install_fedora_packages

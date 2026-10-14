@@ -39,7 +39,8 @@ It also deploys this repo's configs and wallpapers to `~/.config`,
 `~/.local/state`, and the user's pictures folder.
 
 Run from a terminal, it first opens a menu (same look as the Steam game
-picker) where you tick the optional features: Steam, gamescope, LACT, VS Code,
+picker) that asks for a full install or a config update (see below). For a
+full install you then tick the optional features: Steam, gamescope, LACT, VS Code,
 Flatpak and the Flatpak apps, cursors, the login screen, Plymouth, the
 watchdog fix, rEFInd, lsfg-vk and Sunshine. Niri, Noctalia, the base packages
 and the configs are always installed. A confirmation screen shows what will
@@ -51,6 +52,19 @@ They set what's pre-ticked in the menu, and are used as they are with
 `--no-menu` (or `SETUP_MENU=0`), or when there's no terminal.
 
 Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh --no-menu`
+
+### Update configs only
+
+Pick "Update configs only" in the menu, or run:
+
+```bash
+./fedora-niri-setup.sh --configs-only
+```
+
+It fetches this repo and replaces the local niri, Alacritty and Noctalia
+configs and the wallpapers with the repo's (the old ones are backed up
+first), then re-applies the Noctalia wallpaper settings. Nothing else:
+no packages, no system changes, no sudo.
 
 rEFInd, lsfg-vk and Sunshine are set up last. If one of them fails, the
 installer warns and finishes the rest; fix the problem and run it again. The
