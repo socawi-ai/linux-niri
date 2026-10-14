@@ -31,7 +31,7 @@ SELECTION_FILE="${SELECTION_FILE:-$SELECTION_DIR/selected-games.txt}"
 # ends -- so Moonlight always lands on the right screen/workspace regardless
 # of what was focused beforehand.
 NIRI_STREAM_WORKSPACE="${NIRI_STREAM_WORKSPACE:-Stream}"
-NIRI_NATIVE_WORKSPACE="${NIRI_NATIVE_WORKSPACE:-Games}"
+NIRI_NATIVE_WORKSPACE="${NIRI_NATIVE_WORKSPACE:-Web}"
 
 # Always on: quits Steam via prep-cmd's undo when the stream ends (nothing
 # runs on start -- Steam is already up, since it owns the game being

@@ -6,10 +6,6 @@ workspace "Dev" {
     open-on-output "DP-1"
 }
 
-workspace "Games" {
-    open-on-output "DP-1"
-}
-
 workspace "Stream" {
     open-on-output "DP-2"
 }

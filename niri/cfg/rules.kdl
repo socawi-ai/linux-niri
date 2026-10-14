@@ -1,4 +1,19 @@
 // ──────────────────────────────────────────────
+// General appearance
+// ──────────────────────────────────────────────
+
+// First, so the app rules below can override it (later rules win).
+window-rule {
+    geometry-corner-radius 15
+    clip-to-geometry true
+    opacity 0.9
+
+    background-effect {
+        blur true
+    }
+}
+
+// ──────────────────────────────────────────────
 // General window rules
 // ──────────────────────────────────────────────
 
@@ -66,20 +81,6 @@ window-rule {
 window-rule {
     match app-id="Godot" title=r"^Godot Engine - Project Manager"
     open-floating true
-}
-
-// ──────────────────────────────────────────────
-// General appearance
-// ──────────────────────────────────────────────
-
-window-rule {
-    geometry-corner-radius 15
-    clip-to-geometry true
-    opacity 0.9
-
-    background-effect {
-        blur true
-    }
 }
 
 // ──────────────────────────────────────────────
