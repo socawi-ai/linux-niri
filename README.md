@@ -38,8 +38,7 @@ chmod +x fedora-niri-setup.sh
 It also deploys this repo's configs and wallpapers to `~/.config`,
 `~/.local/state`, and the user's pictures folder.
 
-Run from a terminal, it first opens a menu (same look as the Steam game
-picker) that asks for a full install or a config update (see below). For a
+Run from a terminal, it first opens a menu that asks for a full install or a config update (see below). For a
 full install you then tick the optional features: Steam, gamescope, LACT, VS Code,
 Flatpak and the Flatpak apps, cursors, the login screen, Plymouth, the
 watchdog fix, rEFInd, lsfg-vk and Sunshine. Niri, Noctalia, the base packages
