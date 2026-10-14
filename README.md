@@ -51,6 +51,13 @@ Each feature also has an environment variable (see the top of the script).
 They set what's pre-ticked in the menu, and are used as they are with
 `--no-menu` (or `SETUP_MENU=0`), or when there's no terminal.
 
+While it installs, a progress gauge shows the current step instead of every
+command's output, which goes to the log (the gauge shows its path; follow it
+with `tail -f`). The summary prints on the terminal at the end. Use
+`--verbose` (or `PROGRESS_UI=0`) to see the full output instead. The gauge
+is skipped with `ASSUME_YES=0`, since the script then asks questions on the
+terminal.
+
 Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./fedora-niri-setup.sh --no-menu`
 
 ### Update configs only

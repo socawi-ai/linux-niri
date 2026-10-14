@@ -152,6 +152,13 @@ SETUP_MODE="${SETUP_MODE:-}"
 # they are (and SETUP_MODE, or full), e.g. for unattended runs.
 SETUP_MENU="${SETUP_MENU:-1}"
 
+# While installing, show a progress gauge (same look as the menu) instead
+# of every command's output, which then goes only to the log. Needs a
+# terminal, and ASSUME_YES=1 (the default): with ASSUME_YES=0 the script
+# asks questions on the terminal, which the gauge would cover.
+# PROGRESS_UI=0 or --verbose shows the full output instead.
+PROGRESS_UI="${PROGRESS_UI:-1}"
+
 # "tag|variable|label" -- the menu's optional features, in menu order. The
 # core (Niri, Noctalia, base packages, this repo's configs) is always set up.
 SETUP_FEATURES=(
@@ -255,6 +262,12 @@ TARGET_HOME="$HOME"
 DNF_BIN=""
 DNF_SKIP_UNAVAILABLE_SUPPORTED=""
 STEP_COUNT=0
+STEP_TITLE=""
+# The progress gauge's input and process, and the terminal-and-log output
+# to go back to, while it's shown.
+PROGRESS_FD=""
+PROGRESS_PID=""
+PROGRESS_SAVED_OUT=""
 
 # Set by the rEFInd, lsfg-vk and Sunshine steps, for the summary.
 ESP_MOUNT=""
@@ -304,6 +317,8 @@ print_banner() {
 
 section() {
   STEP_COUNT=$((STEP_COUNT + 1))
+  STEP_TITLE="$*"
+  progress_update ""
   printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_BLUE" "$COLOR_RESET"
   printf '%s  [ %02d / %02d ]  %s%s\n' "$COLOR_BLUE" "$STEP_COUNT" "$TOTAL_SECTIONS" "$*" "$COLOR_RESET"
   printf '%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_BLUE" "$COLOR_RESET"
@@ -311,14 +326,17 @@ section() {
 
 log() {
   printf '  %s✓%s  %s\n' "$COLOR_GREEN" "$COLOR_RESET" "$*"
+  progress_update "$*"
 }
 
 warn() {
   WARNINGS+=("$*")
   printf '  %s⚠%s  %s\n' "$COLOR_YELLOW" "$COLOR_RESET" "$*" >&2
+  progress_update "Warning: $*"
 }
 
 die() {
+  stop_progress
   printf '\n  %s✗  ERROR:%s %s\n\n' "$COLOR_RED" "$COLOR_RESET" "$*" >&2
   exit 1
 }
@@ -459,6 +477,8 @@ Options:
                   in place; no sudo, no packages (same as SETUP_MODE=configs)
   --no-menu       Skip the menu; use the defaults and INSTALL_*/...
                   environment variables as they are (same as SETUP_MENU=0)
+  --verbose       Show every command's output instead of a progress gauge
+                  (same as PROGRESS_UI=0)
   -h, --help      Show this help and exit
 
 See the top of the script for all environment variables.
@@ -471,10 +491,80 @@ start_logging() {
   exec > >(tee -a "$LOG_FILE") 2>&1
 }
 
+# The progress gauge: whiptail reading updates from a FIFO, drawn on the
+# terminal while the script's own output goes only to the log.
+start_progress() {
+  [[ "$PROGRESS_UI" == "1" && "$ASSUME_YES" == "1" ]] || return 0
+  have_terminal && have_command whiptail || return 0
+
+  local menu_height menu_width menu_list_height fifo
+  menu_size 3
+  fifo="$(mktemp -u)"
+  mkfifo "$fifo" || return 0
+  whiptail --title "Fedora Niri Setup" --gauge "Starting..." 12 "$menu_width" 0 \
+    <"$fifo" >/dev/tty 2>/dev/null &
+  PROGRESS_PID=$!
+  exec {PROGRESS_FD}>"$fifo"
+  rm -f "$fifo"
+
+  exec {PROGRESS_SAVED_OUT}>&1
+  exec >>"$LOG_FILE" 2>&1
+  # A git password prompt would be hidden behind the gauge; fail instead.
+  export GIT_TERMINAL_PROMPT=0
+  progress_update "Starting."
+}
+
+# Shows the current section and $1 (the latest step) on the gauge.
+progress_update() {
+  [[ -n "$PROGRESS_FD" ]] || return 0
+  kill -0 "$PROGRESS_PID" 2>/dev/null || {
+    PROGRESS_FD=""
+    return 0
+  }
+
+  local percent=0 text="$1"
+  ((TOTAL_SECTIONS > 0)) && percent=$(((STEP_COUNT > 0 ? STEP_COUNT - 1 : 0) * 100 / TOTAL_SECTIONS))
+  ((${#text} <= 200)) || text="${text:0:197}..."
+  # In a subshell: if whiptail has died, the closed pipe's SIGPIPE ends
+  # only that, not the script.
+  (printf 'XXX\n%d\n[%d/%d] %s\n\n%s\n\nFull output: %s\nXXX\n' \
+    "$percent" "$STEP_COUNT" "$TOTAL_SECTIONS" "$STEP_TITLE" "$text" "$LOG_FILE") 1>&"$PROGRESS_FD" 2>/dev/null || true
+}
+
+# Closes the gauge, and shows the output on the terminal (and in the log)
+# again.
+stop_progress() {
+  [[ -n "$PROGRESS_PID" ]] || return 0
+
+  local fd="$PROGRESS_FD" pid="$PROGRESS_PID" i
+  PROGRESS_FD=""
+  PROGRESS_PID=""
+  [[ -z "$fd" ]] || (printf 'XXX\n100\nDone.\nXXX\n') 1>&"$fd" 2>/dev/null || true
+  [[ -z "$fd" ]] || exec {fd}>&-
+  # whiptail exits once its input closes; a process that inherited the
+  # FIFO could keep it open, so it's stopped after a few seconds.
+  for ((i = 0; i < 30; i++)); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    stty sane </dev/tty 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+
+  if [[ -n "$PROGRESS_SAVED_OUT" ]]; then
+    exec 1>&"$PROGRESS_SAVED_OUT" 2>&1
+    exec {PROGRESS_SAVED_OUT}>&-
+    PROGRESS_SAVED_OUT=""
+  fi
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --configs-only) SETUP_MODE=configs ;;
+      --verbose) PROGRESS_UI=0 ;;
       --no-menu) SETUP_MENU=0 ;;
       -h|--help) usage; exit 0 ;;
       *) die "Unknown argument: $1 (see --help)." ;;
@@ -632,6 +722,16 @@ prepare_runtime() {
   run_sudo install -d -m 0755 "$SYSTEM_BACKUP_ROOT"
   run_sudo -v
   log "System backups: $SYSTEM_BACKUP_ROOT"
+
+  # Keeps sudo's timestamp fresh for the whole run, so a long step (like the
+  # lsfg-vk build) doesn't end with a password prompt hidden behind the
+  # progress gauge. Stops when this script does.
+  (
+    while kill -0 "$$" 2>/dev/null; do
+      sudo -n -v 2>/dev/null || exit 0
+      sleep 60
+    done
+  ) </dev/null >/dev/null 2>&1 &
 }
 
 already_backed_up() {
@@ -2329,6 +2429,8 @@ print_next_steps() {
 print_summary() {
   local item
 
+  stop_progress
+
   printf '\n%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_GREEN" "$COLOR_RESET"
   printf '%s  Setup complete%s\n' "$COLOR_GREEN" "$COLOR_RESET"
   printf '%s  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$COLOR_GREEN" "$COLOR_RESET"
@@ -2381,6 +2483,7 @@ main() {
   log "Mode: $([[ "$SETUP_MODE" == "configs" ]] && printf 'update configs only' || printf 'full install')"
   resolve_target_user
   prepare_runtime
+  start_progress
 
   if [[ "$SETUP_MODE" == "configs" ]]; then
     update_configs
