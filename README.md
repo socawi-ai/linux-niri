@@ -117,3 +117,9 @@ timestamped log to the user's home directory.
 - System files: `/var/backups/fedora-niri-setup/`
 - Machines set up with the former `fedora-refind-setup.sh` also have
   `/var/backups/fedora-refind-setup/`
+
+## License
+
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). You may use, change and share it; if you share a changed version, or run one as a network service for others, you must make its source available under the same license.
+
+Third-party files keep their own licenses.
