@@ -51,8 +51,9 @@ DISABLE_CONFLICTING_DISPLAY_MANAGERS="${DISABLE_CONFLICTING_DISPLAY_MANAGERS:-1}
 
 # Set up last, after the desktop. A failure in one of these is reported as a
 # warning and the rest still run; re-run the script once it's fixed.
-#   INSTALL_REFIND   -- themed rEFInd boot menu, with GRUB set to hand off
-#                       instantly (see rEFInd below). UEFI only.
+#   INSTALL_REFIND   -- themed rEFInd boot menu that boots the kernels
+#                       directly; GRUB stays as the fallback (see rEFInd
+#                       below). UEFI with Secure Boot off only.
 #   INSTALL_LSFG_VK  -- builds lsfg-vk from source (needs Lossless Scaling on
 #                       Steam to be useful).
 #   INSTALL_SUNSHINE -- Sunshine streaming host, set to start on login.
@@ -63,11 +64,15 @@ INSTALL_REFIND="${INSTALL_REFIND:-1}"
 INSTALL_LSFG_VK="${INSTALL_LSFG_VK:-1}"
 INSTALL_SUNSHINE="${INSTALL_SUNSHINE:-1}"
 
-# rEFInd is installed as an ADDITIONAL firmware boot entry alongside Fedora's
-# own "Fedora" entry (nothing existing is removed, so the firmware boot menu
-# can always fall back to it), themed with rEFInd-nils, with one manual menu
-# entry that chainloads Fedora's shim -> grub -> BLS chain. GRUB's own menu
-# is then hidden with timeout 0, so rEFInd is the only boot menu you see.
+# rEFInd is installed as an ADDITIONAL firmware boot entry, first in the boot
+# order, themed with rEFInd-nils. It boots the kernels in /boot directly
+# (firmware -> rEFInd -> kernel), with the options in /boot/refind_linux.conf.
+# GRUB stays installed but is only the fallback: Fedora's own "Fedora" entry
+# (shim -> GRUB) is left in place, so the firmware boot menu can always pick it.
+#
+# Secure Boot must be off: this rEFInd is unsigned, and Fedora's shim 16 can't
+# load rEFInd 0.14.2 anyway (misaligned .sbat section; rhboot/shim#803). With
+# Secure Boot on, rEFInd is skipped and GRUB stays the boot menu.
 #
 # rEFInd has no Fedora/COPR package; upstream ships version-pinned RPMs on
 # SourceForge with no "latest" alias, so the version is pinned here.
@@ -81,37 +86,28 @@ REFIND_THEME_DIR="${REFIND_THEME_DIR:-}"
 # Explicit overrides if refind.conf or the ESP can't be found automatically.
 REFIND_CONF_PATH="${REFIND_CONF_PATH:-}"
 ESP_MOUNT_OVERRIDE="${ESP_MOUNT_OVERRIDE:-}"
-# The shim Fedora's own firmware entry boots (\EFI\FEDORA\SHIMX64.EFI on a
-# stock install), relative to the ESP root; rEFInd's menu entry chainloads it.
+# The shim Fedora's own firmware entry boots, relative to the ESP root. Only
+# used to recognize the ESP.
 REFIND_SHIM_LOADER_PATH="${REFIND_SHIM_LOADER_PATH:-/EFI/fedora/shimx64.efi}"
-# --shim and --localkeys make the install ready for Secure Boot: if it's
-# turned on later, nothing needs redoing, but rEFInd's key must be approved
-# once in the blue MokManager screen at the next boot (physical presence
-# only; that can't be scripted). Harmless while Secure Boot is off.
-REFIND_USE_SHIM="${REFIND_USE_SHIM:-1}"
-REFIND_USE_LOCALKEYS="${REFIND_USE_LOCALKEYS:-1}"
-REFIND_MENUENTRY_LABEL="${REFIND_MENUENTRY_LABEL:-Fedora}"
-REFIND_MENUENTRY_ICON="${REFIND_MENUENTRY_ICON:-themes/$REFIND_THEME_NAME/icons/os_fedora.png}"
-# "internal" lets rEFInd find other OSes (e.g. Windows) on internal disks;
-# "external,optical" keeps USB installers/rescue disks visible.
+# Relative to refind.conf's directory. Copied next to each kernel in /boot as
+# vmlinuz-<version>.png (rEFInd's per-loader icon), else it shows Tux.
+REFIND_KERNEL_ICON="${REFIND_KERNEL_ICON:-themes/$REFIND_THEME_NAME/icons/os_fedora.png}"
+# "internal" finds the kernels in /boot and other OSes (e.g. Windows) on
+# internal disks; "external,optical" keeps USB installers/rescue disks visible.
 REFIND_SCANFOR="${REFIND_SCANFOR:-manual,internal,external,optical}"
-# Skipped by that scan: Fedora's own EFI directory (else a duplicate of the
-# manual "Fedora" entry) and EFI/BOOT (the generic fallback loader). Set to
+# Skipped by that scan: Fedora's shim/GRUB (the fallback, reachable from
+# the firmware boot menu) and EFI/BOOT (the generic fallback loader). Set to
 # "" to scan everything.
 REFIND_DONT_SCAN_DIRS="${REFIND_DONT_SCAN_DIRS:-EFI/fedora,EFI/BOOT}"
-# Off: the manual entry already boots grub, which picks the kernel; on, rEFInd
-# adds one "Boot vmlinuz-..." entry per installed kernel.
-REFIND_SCAN_ALL_LINUX_KERNELS="${REFIND_SCAN_ALL_LINUX_KERNELS:-false}"
 REFIND_TIMEOUT_SECONDS="${REFIND_TIMEOUT_SECONDS:-10}"
 # Without an explicit resolution rEFInd often picks a mode that doesn't match
 # the display, and the theme renders distorted. Matches GRUB_GFXMODE's first
 # mode below; set either to "" for rEFInd's own auto-detect.
 REFIND_RESOLUTION_WIDTH="${REFIND_RESOLUTION_WIDTH:-3440}"
 REFIND_RESOLUTION_HEIGHT="${REFIND_RESOLUTION_HEIGHT:-1440}"
-# GRUB once rEFInd hands off to it. "hidden" avoids a menu flash; GRUB's menu
-# is still reachable by holding Shift/Esc during boot.
-GRUB_TIMEOUT_TARGET="${GRUB_TIMEOUT_TARGET:-0}"
-GRUB_TIMEOUT_STYLE_TARGET="${GRUB_TIMEOUT_STYLE_TARGET:-hidden}"
+# Installed so new kernels get the icon too; it also removes icons of
+# kernels that are gone.
+REFIND_ICON_HOOK="${REFIND_ICON_HOOK:-/etc/kernel/install.d/95-refind-icons.install}"
 
 # lsfg-vk (https://lsfg-vk.dev): a Vulkan layer running Lossless Scaling's
 # frame generation, built per the official "Building from Source" guide for
@@ -273,10 +269,6 @@ PROGRESS_SAVED_OUT=""
 ESP_MOUNT=""
 REFIND_BOOT_NUM=""
 SECURE_BOOT_STATE="unknown"
-# The key rEFInd is signed with, and whether shim already trusts it as a MOK
-# (yes/no/unknown).
-REFIND_MOK_KEY=""
-REFIND_MOK_ENROLLED="unknown"
 REFIND_INSTALLED=0
 LSFG_VK_INSTALLED=0
 SUNSHINE_INSTALLED=0
@@ -1274,34 +1266,15 @@ configure_plymouth_and_grub() {
     warn "grubby was not found; kernel arguments were not updated."
   fi
 
-  # With rEFInd as the boot menu, GRUB is set to hand off instantly
-  # (timeout 0, hidden; see configure_grub_handoff). Setting a visible GRUB
-  # menu here would undo that and show two menus, so it's left alone then.
-  if [[ "$INSTALL_REFIND" == "1" && -d /sys/firmware/efi ]] || refind_setup_installed; then
-    log "rEFInd is the boot menu; leaving GRUB's timeout to the rEFInd step."
-  else
-    upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
-    upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
-    record_change "Configured GRUB timeout to $GRUB_TIMEOUT_SECONDS seconds."
-  fi
+  # A visible menu even with rEFInd: rEFInd boots the kernels itself, so GRUB
+  # only shows up when picked as the fallback from the firmware boot menu.
+  upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_SECONDS\""
+  upsert_grub_default GRUB_TIMEOUT_STYLE "\"menu\""
+  record_change "Configured GRUB timeout to $GRUB_TIMEOUT_SECONDS seconds."
   upsert_grub_default GRUB_GFXMODE "\"$GRUB_GFXMODE\""
   upsert_grub_default GRUB_TERMINAL_OUTPUT "\"gfxterm\""
 
   regenerate_grub_config
-}
-
-# Whether rEFInd has been set up on this machine (by this script, or the
-# former fedora-refind-setup.sh): its generated block is in a refind.conf on
-# the EFI System Partition.
-refind_setup_installed() {
-  local esp conf
-  for esp in /boot/efi /efi; do
-    while IFS= read -r conf; do
-      [[ -n "$conf" ]] || continue
-      run_sudo grep -qsxF "$REFIND_MARKER_BEGIN" "$conf" && return 0
-    done < <(run_sudo find "$esp" -maxdepth 4 -iname refind.conf 2>/dev/null || true)
-  done
-  return 1
 }
 
 disable_hardware_watchdog() {
@@ -1945,33 +1918,38 @@ detect_secure_boot() {
   fi
 
   log "Secure Boot state: $SECURE_BOOT_STATE"
-  if [[ "$SECURE_BOOT_STATE" == "enabled" ]]; then
-    warn "Secure Boot is enabled. Unless rEFInd's key is already enrolled, enroll it before rebooting (see the rEFInd steps at the end), or shim will refuse to start rEFInd. The original 'Fedora' entry in the firmware boot menu (F12/F2 at POST) is untouched and always boots."
-  fi
 }
 
-# refind-install --yes never enrolls rEFInd's key with shim (that needs a
-# password prompt), so find the key and check whether it's already a MOK;
-# print_next_steps gives the enroll command when it isn't.
-check_refind_mok_key() {
-  local key=/etc/refind.d/keys/refind.cer
-  [[ "$REFIND_USE_LOCALKEYS" == "1" ]] && key=/etc/refind.d/keys/refind_local.cer
+# Prints "NUM PATH" for each firmware boot entry labeled rEFInd, those in
+# the boot order first and in that order. PATH is lowercased, since the ESP
+# is case-insensitive (older installs registered \EFI\REFIND\REFIND_X64.EFI).
+list_refind_boot_entries() {
+  local entries num line path seen=" "
+  entries="$(run_sudo efibootmgr -v 2>/dev/null || true)"
+  for num in $(sed -n 's/^BootOrder: //p' <<<"$entries" | tr ',' ' ') \
+    $(grep -oE '^Boot[0-9A-Fa-f]{4}\*? rEFInd' <<<"$entries" | cut -c5-8 || true); do
+    [[ "$seen" != *" $num "* ]] || continue
+    seen+="$num "
+    line="$(grep -E "^Boot${num}\*? rEFInd" <<<"$entries" | head -1 || true)"
+    [[ -n "$line" ]] || continue
+    path="$(grep -oE '\\[^()]*\.[Ee][Ff][Ii]' <<<"$line" | head -1 || true)"
+    printf '%s %s\n' "$num" "${path,,}"
+  done
+}
 
-  run_sudo test -f "$key" || {
-    warn "rEFInd's Secure Boot key was not found at $key."
-    return 0
-  }
-  REFIND_MOK_KEY="$key"
-
-  have_command mokutil || return 0
-  local out
-  out="$(run_sudo mokutil --test-key "$key" 2>&1 || true)"
-  if grep -qi 'already enrolled' <<<"$out"; then
-    REFIND_MOK_ENROLLED=yes
-  elif grep -qi 'not enrolled' <<<"$out"; then
-    REFIND_MOK_ENROLLED=no
-  fi
-  log "rEFInd's Secure Boot key ($key) enrolled as a MOK: $REFIND_MOK_ENROLLED"
+# Removes firmware boot entries labeled rEFInd, except the given number:
+# left over from installs through shim, or duplicates. Only ever entries
+# refind-install made; Fedora's and Windows' entries are never touched.
+remove_refind_boot_entries() {
+  local keep="${1:-}" num path
+  while read -r num path; do
+    [[ -n "$num" && "$num" != "$keep" ]] || continue
+    if run_sudo efibootmgr -b "$num" -B >/dev/null; then
+      record_change "Removed the firmware boot entry Boot$num ($path), a leftover rEFInd entry."
+    else
+      warn "Could not remove the leftover rEFInd firmware boot entry Boot$num ($path)."
+    fi
+  done < <(list_refind_boot_entries)
 }
 
 # Finds the EFI System Partition: the mount holding Fedora's shim.
@@ -2039,53 +2017,49 @@ install_refind_package() {
 }
 
 run_refind_install() {
-  if [[ "$REFIND_USE_LOCALKEYS" == "1" ]] && ! have_command sbsign; then
-    log "Installing sbsigntools (sbsign, needed by --localkeys)."
-    dnf_install_best_effort sbsigntools
-    have_command sbsign || {
-      warn "sbsign was not found after installing sbsigntools; refind-install --localkeys can't run. Set REFIND_USE_LOCALKEYS=0 to skip self-signing."
-      return 1
-    }
-  fi
-
-  log "Firmware boot entries before installing rEFInd (none of them is removed):"
+  log "Firmware boot entries before installing rEFInd:"
   run_sudo efibootmgr -v || true
 
-  # --shim copies the shim into rEFInd's own EFI/refind/ directory and makes
-  # a new entry; Fedora's own NVRAM entry is not reused or changed.
+  # Installs EFI/refind/refind_x64.efi plus the driver for /boot's filesystem,
+  # and makes its firmware entry first in the boot order (reusing an existing
+  # one). Without --yes it may ask its own questions.
   local args=()
-  [[ "$REFIND_USE_SHIM" == "1" ]] && args+=(--shim "$ESP_MOUNT$REFIND_SHIM_LOADER_PATH")
-  [[ "$REFIND_USE_LOCALKEYS" == "1" ]] && args+=(--localkeys)
-  # Without --yes, refind-install asks its own questions (e.g. "--shim but
-  # Secure Boot is off, continue?"); only answered for unattended runs.
   [[ "$ASSUME_YES" == "1" ]] && args+=(--yes)
-
   log "Running: refind-install ${args[*]}"
   run_sudo refind-install "${args[@]}" || {
     warn "refind-install failed. Your 'Fedora' firmware boot entry is untouched; the machine still boots normally."
     return 1
   }
 
-  local after_entries refind_lines refind_entry_count expected_entries=1
-  after_entries="$(run_sudo efibootmgr -v || true)"
-  log "Firmware boot entries after installing rEFInd:"
-  printf '%s\n' "$after_entries"
-
-  # --shim registers two entries: the shim-chained one (what boots) and a
-  # "(direct)" one bypassing shim. The summary's undo step names the first.
-  # With -v the device path follows the title, so the title isn't matched
-  # up to the end of the line.
-  refind_lines="$(grep -E '^Boot[0-9A-Fa-f]{4}\*? rEFInd' <<<"$after_entries" || true)"
-  REFIND_BOOT_NUM="$(grep -v '(direct)' <<<"$refind_lines" | head -1 | grep -oE '^Boot[0-9A-Fa-f]{4}' | cut -c5-8 || true)"
-  [[ -n "$REFIND_BOOT_NUM" ]] || REFIND_BOOT_NUM="$(head -1 <<<"$refind_lines" | grep -oE '^Boot[0-9A-Fa-f]{4}' | cut -c5-8 || true)"
-
-  [[ "$REFIND_USE_SHIM" == "1" ]] && expected_entries=2
-  refind_entry_count="$(grep -c . <<<"$refind_lines" || true)"
-  if ((refind_entry_count > expected_entries)); then
-    warn "Found $refind_entry_count firmware boot entries labeled 'rEFInd' (expected $expected_entries). Remove stale duplicates with: sudo efibootmgr -b <NUM> -B"
+  local refind_dir="$ESP_MOUNT/EFI/refind" num path
+  while read -r num path; do
+    if [[ "$path" == '\efi\refind\refind_x64.efi' ]]; then
+      REFIND_BOOT_NUM="$num"
+      break
+    fi
+  done < <(list_refind_boot_entries)
+  [[ -n "$REFIND_BOOT_NUM" ]] && run_sudo test -f "$refind_dir/refind_x64.efi" || {
+    warn "refind-install ran, but $refind_dir/refind_x64.efi or its firmware boot entry is missing."
+    return 1
+  }
+  if [[ "$(run_sudo efibootmgr | sed -n 's/^BootOrder: //p' | cut -d, -f1)" != "$REFIND_BOOT_NUM" ]]; then
+    warn "rEFInd's entry Boot$REFIND_BOOT_NUM isn't first in the firmware boot order; pick it in your firmware settings, or run: sudo efibootmgr -o $REFIND_BOOT_NUM,<the others>"
   fi
+  remove_refind_boot_entries "$REFIND_BOOT_NUM"
 
-  record_change "Registered rEFInd as firmware boot entry Boot${REFIND_BOOT_NUM:-?} (the Fedora entry is left in place)."
+  # Installs through shim (by an earlier version of this script) left shim,
+  # MokManager and a renamed rEFInd (grubx64.efi) in rEFInd's own directory.
+  # Nothing boots them any more; EFI/fedora's copies are separate.
+  for path in shimx64.efi mmx64.efi grubx64.efi; do
+    if run_sudo test -f "$refind_dir/$path"; then
+      backup_system_path "$refind_dir/$path"
+      run_sudo rm -f "$refind_dir/$path" && record_change "Removed the leftover $refind_dir/$path."
+    fi
+  done
+
+  log "Firmware boot entries after installing rEFInd:"
+  run_sudo efibootmgr -v || true
+  record_change "Registered rEFInd as firmware boot entry Boot$REFIND_BOOT_NUM, first in the boot order (the Fedora entry is left in place)."
 }
 
 find_refind_conf() {
@@ -2147,9 +2121,9 @@ install_refind_theme() {
   record_change "Enabled rEFInd theme '$REFIND_THEME_NAME' in $refind_conf."
 }
 
-configure_refind_boot_entry() {
+configure_refind_conf() {
   local refind_conf="$1"
-  local refind_dir tmp icon_line="" resolution_line="" dont_scan_line=""
+  local tmp resolution_line="" dont_scan_line=""
 
   backup_system_path "$refind_conf"
 
@@ -2167,34 +2141,21 @@ configure_refind_boot_entry() {
 
   [[ ! -s "$tmp" ]] || printf '\n' >>"$tmp"
 
-  # Theme includes are relative to refind.conf's directory, but a menuentry's
-  # icon needs a path from the ESP root (leading slash, like loader). Mixing
-  # them up gives no error, just a hazard-stripe placeholder at boot.
-  refind_dir="$(dirname "$refind_conf")"
-  if run_sudo test -f "$refind_dir/$REFIND_MENUENTRY_ICON"; then
-    icon_line="    icon     ${refind_dir#"$ESP_MOUNT"}/$REFIND_MENUENTRY_ICON"
-  else
-    warn "Theme icon $REFIND_MENUENTRY_ICON was not found next to $refind_conf; rEFInd will use its default icon."
-  fi
   if [[ -n "$REFIND_RESOLUTION_WIDTH" && -n "$REFIND_RESOLUTION_HEIGHT" ]]; then
     resolution_line="resolution $REFIND_RESOLUTION_WIDTH $REFIND_RESOLUTION_HEIGHT"
   fi
   [[ -z "$REFIND_DONT_SCAN_DIRS" ]] || dont_scan_line="dont_scan_dirs $REFIND_DONT_SCAN_DIRS"
 
+  # No manual entry: the scan finds the kernels in /boot, folded into one
+  # menu entry that boots the newest (older ones under F2/Tab/Insert).
   cat >>"$tmp" <<EOF
 $REFIND_MARKER_BEGIN
 timeout $REFIND_TIMEOUT_SECONDS
 scanfor $REFIND_SCANFOR
 $dont_scan_line
-scan_all_linux_kernels $REFIND_SCAN_ALL_LINUX_KERNELS
+scan_all_linux_kernels true
+fold_linux_kernels true
 $resolution_line
-
-menuentry "$REFIND_MENUENTRY_LABEL" {
-$icon_line
-    loader   $REFIND_SHIM_LOADER_PATH
-    ostype   Linux
-    graphics on
-}
 $REFIND_MARKER_END
 EOF
 
@@ -2204,15 +2165,84 @@ EOF
     return 1
   }
   rm -f "$tmp"
-  record_change "Configured rEFInd's '$REFIND_MENUENTRY_LABEL' entry (chainloads $REFIND_SHIM_LOADER_PATH) and ${REFIND_TIMEOUT_SECONDS}s timeout in $refind_conf."
+  record_change "Configured rEFInd to boot the kernels in /boot directly, with a ${REFIND_TIMEOUT_SECONDS}s timeout, in $refind_conf."
 }
 
-# GRUB boots instantly once rEFInd hands off to it, so there's one menu.
-configure_grub_handoff() {
-  upsert_grub_default GRUB_TIMEOUT "\"$GRUB_TIMEOUT_TARGET\""
-  upsert_grub_default GRUB_TIMEOUT_STYLE "\"$GRUB_TIMEOUT_STYLE_TARGET\""
-  regenerate_grub_config
-  record_change "Set GRUB_TIMEOUT=$GRUB_TIMEOUT_TARGET and GRUB_TIMEOUT_STYLE=$GRUB_TIMEOUT_STYLE_TARGET (GRUB hands off instantly after rEFInd)."
+# rEFInd doesn't read Fedora's boot entries (/boot/loader/entries), so it
+# gets the kernel options from /boot/refind_linux.conf, next to the kernels.
+# They're taken from GRUB's default entry, so options set with grubby
+# (Plymouth, nowatchdog, ...) apply to both.
+write_refind_linux_conf() {
+  local info root args="" options
+  if have_command grubby && info="$(run_sudo grubby --info=DEFAULT 2>/dev/null)"; then
+    root="$(sed -n 's/^root="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' <<<"$info" | head -1)"
+    args="$(sed -n 's/^args="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' <<<"$info" | head -1)"
+    [[ -z "$root" ]] || args="root=$root $args"
+  fi
+  if [[ "$args" != *root=* ]]; then
+    log "Could not read GRUB's default kernel options; using the running kernel's."
+    args="$(tr ' ' '\n' </proc/cmdline | grep -vE '^(BOOT_IMAGE|initrd)=' | tr '\n' ' ')"
+  fi
+  # Drop BLS variables like $tuned_params, which only GRUB expands, and
+  # extra spaces.
+  options="$(tr ' ' '\n' <<<"$args" | grep -v '^\$' | grep . | tr '\n' ' ')"
+  options="${options% }"
+  [[ "$options" == *root=* ]] || {
+    warn "Could not work out the kernel options (no root=); /boot/refind_linux.conf was not written."
+    return 1
+  }
+
+  local plain
+  plain="$(tr ' ' '\n' <<<"$options" | grep -vxE 'rhgb|quiet|splash' | tr '\n' ' ')"
+  write_system_file /boot/refind_linux.conf 0644 <<EOF
+# Generated by fedora-niri-setup.sh from GRUB's default entry (grubby
+# --info=DEFAULT), and rewritten on every run. Kernel options for rEFInd,
+# which boots the kernels in /boot directly. rEFInd adds initrd= itself.
+"Boot with standard options"  "$options"
+"Boot with text output"       "${plain% }"
+"Boot to single-user mode"    "${plain% } single"
+EOF
+  run_sudo grep -qF "\"$options\"" /boot/refind_linux.conf || {
+    warn "Could not write /boot/refind_linux.conf."
+    return 1
+  }
+  record_change "Wrote rEFInd's kernel options to /boot/refind_linux.conf: $options"
+}
+
+# Gives every kernel in /boot the theme's Fedora icon, now and (through a
+# kernel-install hook) after each kernel update.
+install_refind_kernel_icons() {
+  local refind_conf="$1" icon
+  icon="$(dirname "$refind_conf")/$REFIND_KERNEL_ICON"
+  run_sudo test -f "$icon" || {
+    warn "Theme icon $icon was not found; rEFInd will show its default Linux icon for the kernels."
+    return 0
+  }
+
+  write_system_file "$REFIND_ICON_HOOK" 0755 <<EOF
+#!/bin/sh
+# Installed by fedora-niri-setup.sh. rEFInd shows a kernel with the icon
+# named after it (vmlinuz-<version>.png), so give every kernel in /boot the
+# Fedora icon, and drop icons whose kernel is gone. Runs on every
+# kernel-install add/remove; the arguments aren't needed.
+icon='$icon'
+[ -f "\$icon" ] || exit 0
+for kernel in /boot/vmlinuz-*; do
+  case "\$kernel" in *.png) continue ;; esac
+  [ -f "\$kernel" ] || continue
+  cmp -s "\$icon" "\$kernel.png" || cp "\$icon" "\$kernel.png"
+done
+for png in /boot/vmlinuz-*.png; do
+  [ -f "\$png" ] || continue
+  [ -f "\${png%.png}" ] || rm -f "\$png"
+done
+exit 0
+EOF
+  if run_sudo "$REFIND_ICON_HOOK"; then
+    record_change "Gave the kernels in /boot rEFInd's Fedora icon, kept up to date by $REFIND_ICON_HOOK."
+  else
+    warn "Could not add rEFInd icons for the kernels in /boot."
+  fi
 }
 
 install_refind() {
@@ -2222,10 +2252,25 @@ install_refind() {
   }
 
   detect_secure_boot
+  if [[ "$SECURE_BOOT_STATE" == "enabled" ]]; then
+    warn "Secure Boot is on, so rEFInd was skipped and GRUB stays the boot menu: this rEFInd is unsigned, and Fedora's shim can't load rEFInd 0.14.2 anyway (github.com/rhboot/shim/issues/803). To use rEFInd, turn Secure Boot off in the firmware settings and re-run the script."
+    # Entries from an earlier install can't boot with Secure Boot on.
+    remove_refind_boot_entries
+    return 0
+  fi
+
+  # rEFInd's ext4 driver reads the kernels from /boot. On btrfs (no separate
+  # /boot) they sit in a subvolume, which rEFInd doesn't find by itself.
+  local boot_fstype
+  boot_fstype="$(findmnt -n -o FSTYPE --mountpoint /boot 2>/dev/null || true)"
+  [[ "$boot_fstype" == ext[234] ]] || {
+    warn "rEFInd needs /boot on its own ext4 partition (Fedora's default layout), but /boot is ${boot_fstype:-not a separate partition}; rEFInd was skipped and GRUB stays the boot menu."
+    return 1
+  }
+
   resolve_esp_mount || return 1
   install_refind_package || return 1
   run_refind_install || return 1
-  check_refind_mok_key
 
   local refind_conf
   refind_conf="$(find_refind_conf || true)"
@@ -2234,8 +2279,9 @@ install_refind() {
     return 1
   }
   install_refind_theme "$refind_conf" || return 1
-  configure_refind_boot_entry "$refind_conf" || return 1
-  configure_grub_handoff
+  configure_refind_conf "$refind_conf" || return 1
+  write_refind_linux_conf || return 1
+  install_refind_kernel_icons "$refind_conf"
   REFIND_INSTALLED=1
 }
 
@@ -2495,32 +2541,14 @@ print_next_steps() {
     printf '     compare). Pacing mode needs Vsync on. Docs: https://lsfg-vk.dev/docs/getting-started/\n'
   fi
 
-  if ((REFIND_INSTALLED)) && [[ -n "$REFIND_MOK_KEY" && "$REFIND_MOK_ENROLLED" != "yes" ]]; then
-    if [[ "$SECURE_BOOT_STATE" == "enabled" ]]; then
-      printf '\n  Secure Boot is on: enroll rEFInd'\''s key BEFORE rebooting:\n'
-    else
-      printf '\n  Secure Boot (if you turn it on later, do this first):\n'
-    fi
-    printf '  1. sudo mokutil --import %s\n' "$REFIND_MOK_KEY"
-    printf '     and choose a one-time password.\n'
-    printf '  2. At the next boot, press a key in the blue MokManager screen, then\n'
-    printf '     Enroll MOK > Continue > Yes, enter that password, and Reboot.\n'
-    printf '  If you skip this, shim shows "Security Violation" and opens MokManager:\n'
-    printf '  choose Enroll key from disk > EFI/refind/keys/%s instead.\n' "${REFIND_MOK_KEY##*/}"
-  fi
-
   if ((REFIND_INSTALLED)); then
-    printf '\n  rEFInd (to undo, if you ever need to):\n'
-    if [[ -n "$REFIND_BOOT_NUM" ]]; then
-      printf '  1. sudo efibootmgr -b %s -B   # removes the rEFInd boot entry\n' "$REFIND_BOOT_NUM"
-    else
-      printf '  1. sudo efibootmgr -v, find the "rEFInd" entry (Boot####), then\n'
-      printf '     sudo efibootmgr -b <####> -B\n'
-    fi
-    printf '  2. sudo cp -a %s/etc/default/grub /etc/default/grub\n' "$SYSTEM_BACKUP_ROOT"
-    printf '  3. sudo grub2-mkconfig -o %s\n' "$GRUB_MKCONFIG_OUTPUT"
-    printf '  The original "Fedora" firmware boot entry is untouched; the firmware boot\n'
-    printf '  menu (F12/F2 at POST) can always select it.\n'
+    printf '\n  rEFInd (boots the kernels in /boot directly; keep Secure Boot off):\n'
+    printf '  - Older kernels: press F2/Tab on the Fedora entry.\n'
+    printf '  - Kernel options are in /boot/refind_linux.conf, copied from GRUB'\''s\n'
+    printf '    default entry. After changing them with grubby, re-run this script.\n'
+    printf '  - GRUB is the fallback: if rEFInd ever fails, pick "Fedora" in the\n'
+    printf '    firmware boot menu (F12/F2 at POST).\n'
+    printf '  - To undo: sudo efibootmgr -b %s -B   (removes the rEFInd entry)\n' "$REFIND_BOOT_NUM"
   fi
 }
 

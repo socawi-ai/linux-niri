@@ -66,7 +66,13 @@ The whiptail menu and progress gauge need a terminal: run under `TERM=xterm-256c
 
 `verify_config_source` requires all four to exist.
 
-**Boot**: Plymouth and GRUB look are set early. When rEFInd is enabled (UEFI only) it becomes the visible boot menu: it's installed as an extra firmware entry next to Fedora's, which is never touched, and GRUB is set to `timeout 0` / `hidden`. `configure_plymouth_and_grub` therefore leaves GRUB's timeout alone when rEFInd is enabled or already set up (`refind_setup_installed`). For Secure Boot, rEFInd is installed with `--shim --localkeys`, but `refind-install --yes` never enrolls its key with shim (that needs a password prompt). Instead, `check_refind_mok_key` checks whether the key is already enrolled, and `print_next_steps` gives the `mokutil --import` steps when it isn't.
+**Boot**: Plymouth and GRUB look are set early, and kernel options (Plymouth, `nowatchdog`) are set with `grubby`.
+- When rEFInd is enabled, it's the first firmware entry and boots the kernels in `/boot` directly (firmware → rEFInd → kernel). It's installed without shim and needs Secure Boot off: rEFInd 0.14.2 can't be loaded by Fedora's shim 16 (rhboot/shim#803).
+- With Secure Boot on, `install_refind` skips rEFInd and removes its firmware entries. It also needs `/boot` on its own ext4 partition.
+- rEFInd doesn't read BLS entries, so `write_refind_linux_conf` copies GRUB's default options (`grubby --info=DEFAULT`) into `/boot/refind_linux.conf` on every run.
+- A `kernel-install` hook (`REFIND_ICON_HOOK`) gives each `/boot/vmlinuz-*` a `.png` icon of the same name.
+- GRUB and Fedora's own firmware entry are never removed. GRUB is the fallback, so it always gets a visible menu.
+- `run_refind_install` deletes every other firmware entry labeled rEFInd, plus the shim-era files in `EFI/refind`, so earlier shim-based installs converge.
 
 ## niri config
 

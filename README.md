@@ -31,7 +31,8 @@ chmod +x fedora-niri-setup.sh
 - Hardware-watchdog module blacklist, to silence a common "watchdog did not
   stop" shutdown warning
 - A themed [rEFInd](https://www.rodsbooks.com/refind/) boot menu
-  ([rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils)), UEFI only
+  ([rEFInd-nils](https://github.com/NilsPvR/rEFInd-nils)) that boots the
+  kernels directly, with GRUB kept as a fallback. UEFI with Secure Boot off only
 - [lsfg-vk](https://lsfg-vk.dev) frame generation, built from source
 - The [Sunshine](https://github.com/LizardByte/Sunshine) streaming host
 
@@ -78,18 +79,32 @@ summary at the end lists the manual steps each one leaves.
 
 ### rEFInd boot menu
 
-rEFInd is added as a new firmware boot entry next to Fedora's own, which is
-left untouched, so the firmware boot menu (F12/F2 at POST) can always pick
-Fedora directly. It chainloads Fedora's own shim/GRUB/kernel chain, and GRUB's
-menu is hidden so rEFInd is the only one you see. Undo steps are in the
-summary.
+rEFInd becomes the first firmware boot entry and boots the kernels in
+`/boot` directly, with no GRUB in between. The newest kernel is the Fedora
+entry, and older ones are under F2/Tab. Windows shows up too if it's
+installed. Each kernel gets the theme's Fedora icon, and a `kernel-install`
+hook in `/etc/kernel/install.d/` does the same for new kernels.
 
-rEFInd boots through Fedora's shim and is signed with a key generated on
-your machine, so it also works with Secure Boot on. Shim has to trust that
-key first. The installer doesn't enroll it, because enrolling needs a password
-prompt. When the key isn't enrolled yet, the summary shows the
-`sudo mokutil --import …` command and the MokManager steps. With Secure Boot
-on, do this before rebooting. With it off, do it before you turn Secure Boot on.
+rEFInd doesn't read Fedora's boot entries, so the kernel options are kept in
+`/boot/refind_linux.conf`, copied from GRUB's default entry on every run. If
+you change kernel options with `grubby`, re-run the installer to copy them
+over.
+
+GRUB stays installed as the fallback, and shows its menu when it's used. If
+rEFInd ever fails, pick "Fedora" in the firmware boot menu (F12/F2 at POST),
+which is Fedora's own shim and GRUB, left untouched. To undo, remove the
+rEFInd entry with the `efibootmgr` command shown in the summary.
+
+Requirements:
+- **Secure Boot off.** This rEFInd is unsigned. Fedora's shim also can't load
+  rEFInd 0.14.2, because of a misaligned section in rEFInd's binary
+  ([rhboot/shim#803](https://github.com/rhboot/shim/issues/803)). With
+  Secure Boot on, the installer skips rEFInd, removes any old rEFInd boot
+  entries, and GRUB stays the boot menu.
+- **`/boot` on its own ext4 partition**, which is Fedora's default layout.
+
+Running it again on a machine set up by an earlier version (rEFInd through
+shim) converts it. The leftover rEFInd boot entries and files are removed.
 
 ### lsfg-vk
 
