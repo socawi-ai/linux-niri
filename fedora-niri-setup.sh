@@ -2148,6 +2148,8 @@ configure_refind_conf() {
 
   # No manual entry: the scan finds the kernels in /boot, folded into one
   # menu entry that boots the newest (older ones under F2/Tab/Insert).
+  # use_graphics_for starts them in graphics mode, without the text screen
+  # rEFInd otherwise shows ("Starting vmlinuz-...") before Plymouth.
   cat >>"$tmp" <<EOF
 $REFIND_MARKER_BEGIN
 timeout $REFIND_TIMEOUT_SECONDS
@@ -2155,6 +2157,7 @@ scanfor $REFIND_SCANFOR
 $dont_scan_line
 scan_all_linux_kernels true
 fold_linux_kernels true
+use_graphics_for linux,windows
 $resolution_line
 $REFIND_MARKER_END
 EOF
