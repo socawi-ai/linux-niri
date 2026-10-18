@@ -66,7 +66,7 @@ The whiptail menu and progress gauge need a terminal: run under `TERM=xterm-256c
 
 `verify_config_source` requires all four to exist.
 
-**Boot**: Plymouth and GRUB look are set early. When rEFInd is enabled (UEFI only) it becomes the visible boot menu: it's installed as an extra firmware entry next to Fedora's, which is never touched, and GRUB is set to `timeout 0` / `hidden`. `configure_plymouth_and_grub` therefore leaves GRUB's timeout alone when rEFInd is enabled or already set up (`refind_setup_installed`). Secure Boot is assumed off.
+**Boot**: Plymouth and GRUB look are set early. When rEFInd is enabled (UEFI only) it becomes the visible boot menu: it's installed as an extra firmware entry next to Fedora's, which is never touched, and GRUB is set to `timeout 0` / `hidden`. `configure_plymouth_and_grub` therefore leaves GRUB's timeout alone when rEFInd is enabled or already set up (`refind_setup_installed`). For Secure Boot, rEFInd is installed with `--shim --localkeys`, but `refind-install --yes` never enrolls its key with shim (that needs a password prompt). Instead, `check_refind_mok_key` checks whether the key is already enrolled, and `print_next_steps` gives the `mokutil --import` steps when it isn't.
 
 ## niri config
 

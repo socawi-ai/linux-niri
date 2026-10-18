@@ -273,6 +273,10 @@ PROGRESS_SAVED_OUT=""
 ESP_MOUNT=""
 REFIND_BOOT_NUM=""
 SECURE_BOOT_STATE="unknown"
+# The key rEFInd is signed with, and whether shim already trusts it as a MOK
+# (yes/no/unknown).
+REFIND_MOK_KEY=""
+REFIND_MOK_ENROLLED="unknown"
 REFIND_INSTALLED=0
 LSFG_VK_INSTALLED=0
 SUNSHINE_INSTALLED=0
@@ -1942,8 +1946,32 @@ detect_secure_boot() {
 
   log "Secure Boot state: $SECURE_BOOT_STATE"
   if [[ "$SECURE_BOOT_STATE" == "enabled" ]]; then
-    warn "Secure Boot is ENABLED. rEFInd is installed via --shim/--localkeys, but you must approve its key in the blue MokManager screen at the next reboot, or it won't boot into rEFInd. If that happens, pick the original 'Fedora' entry in the firmware boot menu (F12/F2 at POST); it is untouched."
+    warn "Secure Boot is enabled. Unless rEFInd's key is already enrolled, enroll it before rebooting (see the rEFInd steps at the end), or shim will refuse to start rEFInd. The original 'Fedora' entry in the firmware boot menu (F12/F2 at POST) is untouched and always boots."
   fi
+}
+
+# refind-install --yes never enrolls rEFInd's key with shim (that needs a
+# password prompt), so find the key and check whether it's already a MOK;
+# print_next_steps gives the enroll command when it isn't.
+check_refind_mok_key() {
+  local key=/etc/refind.d/keys/refind.cer
+  [[ "$REFIND_USE_LOCALKEYS" == "1" ]] && key=/etc/refind.d/keys/refind_local.cer
+
+  run_sudo test -f "$key" || {
+    warn "rEFInd's Secure Boot key was not found at $key."
+    return 0
+  }
+  REFIND_MOK_KEY="$key"
+
+  have_command mokutil || return 0
+  local out
+  out="$(run_sudo mokutil --test-key "$key" 2>&1 || true)"
+  if grep -qi 'already enrolled' <<<"$out"; then
+    REFIND_MOK_ENROLLED=yes
+  elif grep -qi 'not enrolled' <<<"$out"; then
+    REFIND_MOK_ENROLLED=no
+  fi
+  log "rEFInd's Secure Boot key ($key) enrolled as a MOK: $REFIND_MOK_ENROLLED"
 }
 
 # Finds the EFI System Partition: the mount holding Fedora's shim.
@@ -2197,6 +2225,7 @@ install_refind() {
   resolve_esp_mount || return 1
   install_refind_package || return 1
   run_refind_install || return 1
+  check_refind_mok_key
 
   local refind_conf
   refind_conf="$(find_refind_conf || true)"
@@ -2464,6 +2493,20 @@ print_next_steps() {
     printf '     LSFGVK_PROFILE=<name>.\n'
     printf '  3. Check the layer loads with vkcube (DISABLE_LSFGVK=1 vkcube to\n'
     printf '     compare). Pacing mode needs Vsync on. Docs: https://lsfg-vk.dev/docs/getting-started/\n'
+  fi
+
+  if ((REFIND_INSTALLED)) && [[ -n "$REFIND_MOK_KEY" && "$REFIND_MOK_ENROLLED" != "yes" ]]; then
+    if [[ "$SECURE_BOOT_STATE" == "enabled" ]]; then
+      printf '\n  Secure Boot is on: enroll rEFInd'\''s key BEFORE rebooting:\n'
+    else
+      printf '\n  Secure Boot (if you turn it on later, do this first):\n'
+    fi
+    printf '  1. sudo mokutil --import %s\n' "$REFIND_MOK_KEY"
+    printf '     and choose a one-time password.\n'
+    printf '  2. At the next boot, press a key in the blue MokManager screen, then\n'
+    printf '     Enroll MOK > Continue > Yes, enter that password, and Reboot.\n'
+    printf '  If you skip this, shim shows "Security Violation" and opens MokManager:\n'
+    printf '  choose Enroll key from disk > EFI/refind/keys/%s instead.\n' "${REFIND_MOK_KEY##*/}"
   fi
 
   if ((REFIND_INSTALLED)); then

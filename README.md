@@ -84,6 +84,13 @@ Fedora directly. It chainloads Fedora's own shim/GRUB/kernel chain, and GRUB's
 menu is hidden so rEFInd is the only one you see. Undo steps are in the
 summary.
 
+rEFInd boots through Fedora's shim and is signed with a key generated on
+your machine, so it also works with Secure Boot on. Shim has to trust that
+key first. The installer doesn't enroll it, because enrolling needs a password
+prompt. When the key isn't enrolled yet, the summary shows the
+`sudo mokutil --import …` command and the MokManager steps. With Secure Boot
+on, do this before rebooting. With it off, do it before you turn Secure Boot on.
+
 ### lsfg-vk
 
 Needs Lossless Scaling bought and installed on Steam, switched to its
