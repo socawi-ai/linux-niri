@@ -96,6 +96,89 @@ chmod +x arch-niri-setup.sh
 
 Unattended: `env TARGET_USER=your-user ASSUME_YES=1 ./arch-niri-setup.sh`
 
+## Sunshine game streaming (optional, standalone)
+
+`install-sunshine.sh` installs [Sunshine](https://github.com/LizardByte/Sunshine)
+(a self-hosted Moonlight streaming host) from each distro's stable channel and
+enables it to start on login:
+
+- Fedora: LizardByte's own COPR, stable channel
+- Arch: the AUR's stable `sunshine` package, via an AUR helper (`paru` by
+  default, `yay` supported) — bootstrapped from the AUR if missing
+
+Installs the native package rather than Flatpak: Flatpak's Sunshine sandbox
+doesn't support the KMS screen capture this repo's bare-Wayland/niri sessions
+need. Also sets the capture output (`output_name`) to `DP-2` by default —
+override with `SUNSHINE_CAPTURE_OUTPUT` if that's not the right connector on
+your machine (`niri msg outputs` lists them).
+
+Fully standalone: not called by `fedora-niri-setup.sh`/`arch-niri-setup.sh`,
+and doesn't require either to have run first.
+
+Run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/install-sunshine.sh -o install-sunshine.sh
+chmod +x install-sunshine.sh
+./install-sunshine.sh
+```
+
+One manual step Sunshine itself requires: open https://localhost:47990 and
+set the initial admin username/password — it won't accept streaming
+connections until that's done.
+
+## Steam library → Sunshine sync (optional, standalone)
+
+`steam-sunshine-sync.sh` scans your installed Steam games and syncs a chosen
+subset into Sunshine's `apps.json` as `steam://rungameid/<appid>` launchers,
+with cover art pulled from Steam's public CDN. Safe to re-run any time — it
+only touches its own slice of `apps.json` (entries whose "detached" command
+contains `steam://rungameid/`), so hand-added Sunshine apps are left alone,
+and uninstalled games silently drop out on the next sync.
+
+Also switches niri to a dedicated streaming workspace (`Stream` by default)
+via Sunshine's `prep-cmd` when a stream starts, and back to your native
+workspace (`Games` by default) when it ends.
+
+Requires Steam and Sunshine already installed. Doesn't require
+`install-sunshine.sh` or either setup script to have run first.
+
+Run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/steam-sunshine-sync.sh -o steam-sunshine-sync.sh
+chmod +x steam-sunshine-sync.sh
+./steam-sunshine-sync.sh
+```
+
+## lsfg-vk frame generation (optional, standalone, Fedora only)
+
+`install-lsfg-vk.sh` builds and installs [lsfg-vk](https://lsfg-vk.dev) from
+source: a Vulkan layer that runs Lossless Scaling's frame-generation
+algorithm on Linux, following the official Fedora build-from-source guide.
+It also registers the installed library with `ldconfig` if Fedora's default
+library search path doesn't already cover it — `/usr/local/lib64` isn't
+scanned by default, which otherwise silently breaks the layer for every
+Vulkan app, not just one game — and functionally verifies the fix with a
+`vkcube` test run rather than trusting a file-presence check alone.
+
+Requires [Lossless Scaling](https://store.steampowered.com/app/993090)
+purchased and installed through Steam, switched to its `lsfg-vk` beta branch:
+lsfg-vk is a re-implementation of its Vulkan layer, not a replacement for the
+app, and needs the `lsfg-vk.dll` file that ships inside it. That Steam-side
+step can't be scripted.
+
+Arch has its own AUR packages (`lsfg-vk` / `lsfg-vk-bin` / `lsfg-vk-git`) and
+doesn't need this script.
+
+Run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/socawi-ai/linux-niri/main/install-lsfg-vk.sh -o install-lsfg-vk.sh
+chmod +x install-lsfg-vk.sh
+./install-lsfg-vk.sh
+```
+
 ## archinstall profile (optional)
 
 `archinstall/user_configuration.json` reproduces this machine's base-system
