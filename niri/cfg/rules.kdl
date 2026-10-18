@@ -84,6 +84,20 @@ window-rule {
 }
 
 // ──────────────────────────────────────────────
+// Storyteller Craft App Suite (CADCraft, LightCraft, PhotoCraft, ...)
+// ──────────────────────────────────────────────
+
+window-rule {
+    match app-id=r"^ai\.storyteller\."
+    match app-id="artcraft-launcher"
+    opacity 1.0
+
+    background-effect {
+        blur false
+    }
+}
+
+// ──────────────────────────────────────────────
 // Nautilus
 // ──────────────────────────────────────────────
 
