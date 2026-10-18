@@ -2261,10 +2261,16 @@ install_refind() {
 
   # rEFInd's ext4 driver reads the kernels from /boot. On btrfs (no separate
   # /boot) they sit in a subvolume, which rEFInd doesn't find by itself.
-  local boot_fstype
-  boot_fstype="$(findmnt -n -o FSTYPE --mountpoint /boot 2>/dev/null || true)"
-  [[ "$boot_fstype" == ext[234] ]] || {
-    warn "rEFInd needs /boot on its own ext4 partition (Fedora's default layout), but /boot is ${boot_fstype:-not a separate partition}; rEFInd was skipped and GRUB stays the boot menu."
+  # Only the first line: /boot can be mounted twice, stacked (Fedora does
+  # this), and findmnt then lists it twice.
+  local boot_target="" boot_fstype=""
+  read -r boot_target boot_fstype < <(findmnt -n -o TARGET,FSTYPE --target /boot 2>/dev/null || true)
+  [[ "$boot_target" == /boot && "$boot_fstype" == ext[234] ]] || {
+    if [[ "$boot_target" == /boot ]]; then
+      warn "rEFInd needs /boot on its own ext4 partition (Fedora's default layout), but /boot is $boot_fstype; rEFInd was skipped and GRUB stays the boot menu."
+    else
+      warn "rEFInd needs /boot on its own ext4 partition (Fedora's default layout), but /boot is part of ${boot_target:-another filesystem}; rEFInd was skipped and GRUB stays the boot menu."
+    fi
     return 1
   }
 
