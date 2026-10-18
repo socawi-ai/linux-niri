@@ -2262,6 +2262,58 @@ clone_or_update_lsfg_vk() {
   fi
 }
 
+# The layer's manifest names liblsfg-vk-layer.so by bare filename, and Fedora
+# doesn't search /usr/local/lib64 by default, so the Vulkan loader silently
+# fails to load it for every app. Register the install's lib dir if needed.
+register_lsfg_vk_library_path() {
+  local lib_path lib_dir
+  lib_path="$(find "$LSFG_VK_INSTALL_PREFIX" -name 'liblsfg-vk-layer.so' 2>/dev/null | head -n1)"
+  if [[ -z "$lib_path" ]]; then
+    warn "Could not find liblsfg-vk-layer.so under $LSFG_VK_INSTALL_PREFIX to check the library search path."
+    return 0
+  fi
+  lib_dir="$(dirname "$lib_path")"
+
+  if ldconfig -p | grep -q 'liblsfg-vk-layer\.so '; then
+    log "liblsfg-vk-layer.so is already on the library search path."
+    return 0
+  fi
+
+  log "Registering $lib_dir with ldconfig so the Vulkan loader can find the lsfg-vk layer."
+  printf '%s\n' "$lib_dir" | write_system_file /etc/ld.so.conf.d/lsfg-vk.conf || {
+    warn "Could not write /etc/ld.so.conf.d/lsfg-vk.conf."
+    return 1
+  }
+  run_sudo ldconfig || {
+    warn "ldconfig failed after registering $lib_dir."
+    return 1
+  }
+  record_change "Registered $lib_dir with ldconfig so the Vulkan loader can find liblsfg-vk-layer.so."
+}
+
+# File checks and lsfg-vk-cli's healthcheck don't catch a layer the loader
+# can't open, so run vkcube briefly and check the loader inserted it.
+verify_lsfg_vk_layer_loads() {
+  have_command vkcube || {
+    warn "vkcube not found; skipped checking that the lsfg-vk layer loads."
+    return 0
+  }
+  [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]] || {
+    log "No graphical session; skipped checking that the lsfg-vk layer loads with vkcube."
+    return 0
+  }
+
+  local out
+  out="$(mktemp)"
+  timeout 3 env VK_LOADER_DEBUG=layer vkcube >"$out" 2>&1 || true
+  if grep -q 'Insert instance layer "VK_LAYER_LSFGVK_frame_generation"' "$out"; then
+    log "Verified with vkcube that the Vulkan loader loads the lsfg-vk layer."
+  else
+    warn "vkcube did not load the lsfg-vk layer. Investigate with: VK_LOADER_DEBUG=layer vkcube 2>&1 | grep -i lsfgvk"
+  fi
+  rm -f "$out"
+}
+
 install_lsfg_vk() {
   install_lsfg_vk_dependencies || return 1
   clone_or_update_lsfg_vk || return 1
@@ -2293,6 +2345,9 @@ install_lsfg_vk() {
   }
   record_change "Built and installed lsfg-vk to $LSFG_VK_INSTALL_PREFIX."
   LSFG_VK_INSTALLED=1
+
+  register_lsfg_vk_library_path || return 1
+  verify_lsfg_vk_layer_loads
 
   if have_command lsfg-vk-cli; then
     log "Running the lsfg-vk-cli healthcheck."

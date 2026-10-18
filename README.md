@@ -88,6 +88,9 @@ summary.
 
 Needs Lossless Scaling bought and installed on Steam, switched to its
 `lsfg-vk` beta branch. Re-running the installer updates and rebuilds lsfg-vk.
+Fedora doesn't search `/usr/local/lib64` for libraries, so the installer
+registers the layer's library directory in `/etc/ld.so.conf.d/lsfg-vk.conf`
+and then runs `vkcube` briefly to check that the Vulkan loader loads the layer.
 
 ### Sunshine
 
