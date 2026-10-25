@@ -34,8 +34,11 @@ binds {
     XF86AudioPause allow-when-locked=true { spawn-sh "noctalia msg media toggle"; }
 
     // ─── Brightness Controls ───
-    XF86MonBrightnessUp allow-when-locked=true { spawn-sh "qs -c noctalia-shell ipc call brightness increase"; }
-    XF86MonBrightnessDown allow-when-locked=true { spawn-sh "qs -c noctalia-shell ipc call brightness decrease"; }
+    // The Keychron's brightness keys (F1/F2, or Fn+F1/F2 in Windows mode).
+    // The monitors are external, so Noctalia sets brightness over DDC/CI
+    // (ddcutil, enabled in noctalia/settings.toml), on the focused monitor.
+    XF86MonBrightnessUp allow-when-locked=true { spawn-sh "noctalia msg brightness-up"; }
+    XF86MonBrightnessDown allow-when-locked=true { spawn-sh "noctalia msg brightness-down"; }
 
     // ─── Window Movement and Focus ───
     Mod+Q                               { close-window; }

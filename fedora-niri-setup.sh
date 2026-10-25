@@ -232,7 +232,7 @@ DISABLE_HARDWARE_WATCHDOG="${DISABLE_HARDWARE_WATCHDOG:-1}"
 WATCHDOG_MODULES_TO_BLACKLIST="${WATCHDOG_MODULES_TO_BLACKLIST:-iTCO_wdt iTCO_vendor_support sp5100_tco}"
 NOCTALIA_CONFIG_FILE="${NOCTALIA_CONFIG_FILE:-settings.toml}"
 NOCTALIA_CONFIG_RELATIVE_DIR="${NOCTALIA_CONFIG_RELATIVE_DIR:-.local/state/noctalia}"
-NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-13.png}"
+NOCTALIA_WALLPAPER_FILE="${NOCTALIA_WALLPAPER_FILE:-vpoem3.jpg}"
 NOCTALIA_WALLPAPER_MONITORS="${NOCTALIA_WALLPAPER_MONITORS:-}"
 GREETD_USER="${GREETD_USER:-greeter}"
 NOCTALIA_GREETER_SESSION_BIN="${NOCTALIA_GREETER_SESSION_BIN:-}"
@@ -1004,6 +1004,8 @@ install_fedora_packages() {
     pipewire-alsa
     pipewire-jack-audio-connection-kit
     pavucontrol
+    # Noctalia's brightness control for external monitors (DDC/CI).
+    ddcutil
   )
 
   if [[ -n "$EXTRA_FEDORA_PACKAGES" ]]; then

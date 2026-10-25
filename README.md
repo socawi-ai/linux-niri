@@ -24,6 +24,8 @@ chmod +x fedora-niri-setup.sh
 - Niri, greetd, Noctalia v5 + Noctalia Greeter
 - Alacritty, Nautilus, Fish, Firefox
 - PipeWire, pavucontrol, desktop portals, GTK/Qt Wayland support
+- ddcutil, so the brightness keys set the monitors' brightness over DDC/CI
+  (turn DDC/CI on in the monitor's on-screen menu)
 - McMojave cursors, Nautilus Open Any Terminal (set to Alacritty)
 - LACT (`lactd` service), for AMD/Nvidia/Intel GPU control
 - VS Code, Steam (RPM Fusion), gamescope, Plymouth spinner
