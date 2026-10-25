@@ -604,7 +604,7 @@ sync_apps_json() {
            + (if $quit_steam then
                [{
                  "do": "",
-                 "undo": "steam -shutdown 2>/dev/null || flatpak kill com.valvesoftware.Steam 2>/dev/null || true"
+                 "undo": "sh -c \"steam -shutdown 2>/dev/null || flatpak kill com.valvesoftware.Steam 2>/dev/null || true\""
                }]
              else [] end)
          )}')")
